@@ -98,7 +98,7 @@ All work happens on a branch cut **from the latest `main`**, then merged back vi
 | `feedback` | Feedback Service (Ollama local LLM) |
 | `dashboard` | Dashboard / UI |
 | `sim` | Sensor simulator (dataset replay) |
-| `broker` / `infra` | Mosquitto, Docker, SQLite, compose |
+| `broker` / `infra` | Mosquitto, Docker, PostgreSQL, compose |
 | `shared` | Shared contracts / schemas |
 | `docs` | Documentation |
 

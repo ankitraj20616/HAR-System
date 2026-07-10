@@ -29,26 +29,24 @@ Anyone reading this document should be able to understand:
 
 ### 1.2 Product summary (one paragraph)
 The HAR System is a **software application** that recognizes a patient's physical activities
-(walking, sitting, standing, lying, exercising) and detects **falls** in real time by combining two
-data sources — a **camera (webcam) pose stream** and a **wearable-sensor stream** — and then
-produces **personalized, plain-language health feedback and alerts** using a local **Generative-AI
-(GenAI) model**. Caregivers and doctors monitor everything through a **web dashboard**. The entire
-system is built **only from free and open-source software and pre-trained models**; the team does
-**not** train any model of its own.
+(walking, sitting, standing, lying, exercising) and detects **falls** in real time using a **software-only model**
+by processing a **camera (webcam or CCTV) pose stream** (and optionally a **simulated software-wearable-sensor stream**)
+and then produces **personalized, plain-language health feedback and alerts** using a pre-trained **Generative-AI
+(GenAI) model** (either local open-source or cloud-based closed-source). Caregivers and doctors monitor everything through a
+**web dashboard** backed by a **PostgreSQL database**. The entire system is built **without physical hardware or custom model training**,
+utilizing off-the-shelf pre-trained models and a software-only pipeline.
 
 ### 1.3 Intended audience
 - **Project team & evaluators** — to agree on scope and grade against acceptance criteria.
 - **Developers** (the team itself in the build phase) — as the source of truth for required behaviour.
 - **Demo viewers / faculty guide** — to understand capabilities and limitations.
 
-### 1.4 Guiding constraints (non-negotiable)
-1. **100% open-source / free.** No paid services, no cloud billing. (No Firebase/AWS/Thingspeak.)
-2. **No custom model training.** Only **pre-trained, openly available models** are used for
-   inference (MediaPipe Pose, a pre-trained HuggingFace HAR model, and a local GenAI LLM via Ollama).
-3. **Software-only deployment.** Runs on a standard laptop. No physical IoT hardware is required;
-   the wearable sensor stream is produced by a **simulator** that replays a public dataset.
-4. **Privacy-first.** Raw camera frames are **never stored**; only numeric body-landmark data leaves
-   the video component.
+### 1.4 Guiding constraints
+1. **Flexible Model Choices (Open & Closed Source).** Supports both free local open-source models (no paid cloud billing) and closed-source proprietary APIs (which require internet connectivity and API keys).
+2. **No custom model training.** Only **pre-trained models** (open-source or closed-source) are used for
+   inference (e.g., MediaPipe/YOLO Pose for video, HuggingFace classifiers for sensor data, and local Ollama or cloud-based LLMs for GenAI feedback).
+3. **Strictly Software-only deployment.** Runs on a standard computer. No physical IoT hardware is required or supported; the optional wearable sensor stream is produced by a **software simulator** that replays a public dataset.
+4. **Privacy-first.** Raw camera frames are **never stored**; only numeric body-landmark data leaves the video component.
 
 ### 1.5 Glossary
 | Term | Meaning |
@@ -134,9 +132,16 @@ open-source, pre-trained technology?*
   after that the system runs **fully offline**.
 - A single patient is in frame for the camera modality during a demo.
 
-### 3.4 Dependencies (all free/open-source — see TDD §2 for versions/licenses)
-MediaPipe Pose, OpenCV, a pre-trained HuggingFace HAR model, Ollama (+ a small open LLM such as
-Llama 3.2 3B / Qwen2.5 3B / Phi-3-mini), FastAPI, Mosquitto (MQTT), SQLite, React + Vite, Docker.
+### 3.4 Dependencies
+- **Video Modality Options (Pose & Posture):**
+  - *Open-Source:* MediaPipe Pose, YOLOv8 Pose, YOLOv11 Pose, OpenPose
+  - *Closed-Source / Cloud APIs:* Google Cloud Video Intelligence API, Microsoft Azure Vision API, AWS Rekognition
+- **Sensor Modality Options (Software Replay):**
+  - *Open-Source:* Pre-trained HuggingFace HAR models (e.g., CNN or LSTM classifiers)
+- **Generative AI / LLM Options (Personalized Feedback & Alerts):**
+  - *Open-Source (Local):* Llama 3.2 (1B/3B), Qwen2.5 (1.5B/3B), Phi-3-mini (via Ollama)
+  - *Closed-Source (API):* Google Gemini (Gemini 1.5 Flash/Pro), OpenAI GPT-4o/GPT-4o-mini, Anthropic Claude 3.5 Sonnet
+- **Backend & Middleware:** FastAPI, Uvicorn, Mosquitto (MQTT Broker), PostgreSQL (Primary Database), Docker, docker-compose, React + Vite (Frontend)
 
 ---
 
@@ -403,7 +408,7 @@ following live demo succeeds on a single laptop, fully offline:
 - [ ] **Timeline & trend** views populate from persisted history.
 - [ ] Turning the **webcam off** does not crash the system (sensor-only continues).
 - [ ] **Metrics harness** prints F1 / fall precision-recall / latency, and **fusion F1 > single-modality F1**.
-- [ ] Dependency audit confirms **no paid service and no custom-trained model**.
+- [ ] Dependency audit confirms model selection and integration configurations (local open-source, or API keys for closed-source) and no custom-trained model.
 
 ---
 

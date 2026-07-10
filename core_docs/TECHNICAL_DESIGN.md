@@ -19,17 +19,11 @@
 ## 1. Architecture Overview
 
 ### 1.1 Design principles
-- **Open-source & free only.** Every component below is OSS with a permissive license. No paid cloud.
-- **No model training.** All ML is **inference on pre-trained models**: MediaPipe Pose (video), a
-  pre-trained HuggingFace HAR model (sensor), and a local GenAI LLM via Ollama (feedback).
-- **Microservices** (as promised in the project PPT): five independent services, loosely coupled via
-  **MQTT** pub/sub, so they can be developed/tested/deployed independently (fault isolation, parallel
-  teamwork). Maps to FR-X3, NFR-4, NFR-9.
-- **Privacy by construction.** The video service emits only numeric landmarks; raw frames never leave
-  the process and are never persisted (FR-V5, NFR-3).
-- **Software-first / hardware-optional.** A **simulator** replays a public dataset onto the sensor
-  channel so the system runs with zero hardware (FR-X2). An optional ESP32 firmware path is documented
-  (§12) but not required.
+- **Software-only Model.** The system operates completely in software on standard computer hardware, utilizing camera/webcam video feeds for pose estimation and activity recognition, and simulated sensor inputs (with no active physical IoT hardware deployment or physical wiring).
+- **No model training.** All AI components use pre-trained models for inference. The project supports both local open-source models (for privacy and offline usage) and cloud-based closed-source APIs (for high accuracy and reduced local compute requirements).
+- **Microservices Architecture.** Five independent services are loosely coupled via an **MQTT** pub/sub broker, enabling modular development, deployment, and fault isolation.
+- **Privacy by construction.** The video service processes webcam or video files locally and emits only numeric body landmarks; raw video frames are immediately discarded and never persisted.
+- **Robust Persistence.** PostgreSQL is used as the centralized relational database for storing activity timelines, alerts, events, and feedback.
 
 ### 1.2 Component diagram
 ```mermaid
@@ -47,7 +41,7 @@ flowchart TD
     end
 
     BROKER{{Mosquitto MQTT Broker}}
-    DB[(SQLite\ntimeline + events)]
+    DB[(PostgreSQL\ntimeline + events)]
     DASH[Dashboard\nReact + Vite + Recharts]
 
     CAM --> VID
@@ -69,50 +63,49 @@ flowchart TD
 1. **Simulator** publishes raw IMU windows to MQTT (`har/sensor/raw`).
 2. **Sensor Service** consumes raw windows → extracts features → runs the pre-trained HF HAR model →
    publishes `{label, confidence}` to `har/sensor/prediction`.
-3. **Video Service** reads webcam → MediaPipe Pose landmarks → geometric posture rules → publishes
+3. **Video Service** reads webcam/video source → MediaPipe/YOLO Pose landmarks → geometric posture rules → publishes
    `{label, confidence, orientation}` to `har/video/prediction`.
 4. **Fusion Service** time-aligns the two prediction streams → confidence-weighted vote + temporal
    smoothing → fall logic → publishes `har/activity` (continuous) and `har/event` (fall/abnormal),
-   and writes both to **SQLite**.
-5. **Feedback Service** subscribes to events + periodically reads the timeline → prompts the local
-   **Ollama LLM** → produces structured feedback/alerts/summaries → stores them and pushes to the
+   and writes both to **PostgreSQL**.
+5. **Feedback Service** subscribes to events + periodically reads the timeline → prompts the
+   **LLM (local Ollama Llama/Qwen or cloud Gemini/GPT/Claude APIs)** → produces structured feedback/alerts/summaries → stores them in **PostgreSQL** and pushes to the
    dashboard.
-6. **Dashboard** shows everything live via **WebSocket**, and reads history via **REST**.
+6. **Dashboard** shows everything live via **WebSocket**, and reads history via **REST** endpoints backed by PostgreSQL.
 
 ---
 
-## 2. Technology Stack (all open-source / free)
+## 2. Technology Stack
 
-| Layer | Technology | Role | License (typical) |
+| Layer | Technology Options | Role | License / Pricing |
 |---|---|---|---|
 | Language (backend) | **Python 3.11+** | All services & simulator | PSF |
 | Web framework | **FastAPI** + **Uvicorn** | REST + WebSocket endpoints per service | MIT / BSD |
-| Pose estimation | **MediaPipe** (Pose / Tasks) | Pre-trained body-landmark detection (video) | Apache-2.0 |
+| Pose estimation (Open) | **MediaPipe Pose / YOLOv8 Pose / YOLOv11 Pose** | Pre-trained body-landmark detection (video) | Apache-2.0 / AGPL-3.0 |
+| Pose estimation (Closed) | **Google Cloud Video Intelligence / Azure Vision API** | Cloud-based pose / activity analysis APIs | Paid Cloud Billing |
 | Vision I/O | **OpenCV (opencv-python)** | Webcam capture, frame handling | Apache-2.0 |
-| Sensor model | **HuggingFace Transformers / `huggingface_hub`** | Load & run a **pre-trained HAR model** (inference only) | Apache-2.0 |
+| Sensor model (Open) | **HuggingFace Transformers / `huggingface_hub`** | Load & run a **pre-trained HAR model** (inference only) | Apache-2.0 |
 | Numerics | **NumPy**, **SciPy**, **pandas** | Feature extraction, windowing, dataset replay | BSD |
-| GenAI runtime | **Ollama** | Runs a small open LLM locally, offline | MIT (engine); models per their open licenses |
-| GenAI model | **Llama 3.2 3B** *(default)* / Qwen2.5 3B / Phi-3-mini | Personalized feedback, alerts, summaries | Open model licenses |
-| Messaging | **Eclipse Mosquitto** (broker) + **paho-mqtt** (client) | Inter-service pub/sub transport | EPL/EDL / EPL |
-| Persistence | **SQLite** (default) — Postgres optional | Activity timeline, events, feedback storage | Public domain / PostgreSQL license |
+| GenAI (Open-Source) | **Ollama (Llama 3.2, Qwen2.5, Phi-3-mini)** | Runs open LLMs locally, fully offline | MIT / Open model licenses |
+| GenAI (Closed-Source) | **Google Gemini API, OpenAI GPT-4o-mini, Claude 3.5** | High-quality cloud LLM inference APIs | Paid API Billing |
+| Messaging | **Eclipse Mosquitto** (broker) + **paho-mqtt** (client) | Inter-service pub/sub transport | EPL/EDL |
+| Persistence | **PostgreSQL** | Relational database for activity timeline, events, and feedback | PostgreSQL License |
 | Frontend | **React + Vite** | Dashboard SPA | MIT |
 | Charts | **Recharts** | Trend/timeline charts | MIT |
 | Realtime UI | **Native WebSocket** (browser) | Live updates to dashboard | — |
-| Orchestration | **Docker** + **docker-compose** | One-command startup (FR-X3) | Apache-2.0 |
+| Orchestration | **Docker** + **docker-compose** | Single-command containerized deployment of services | Apache-2.0 |
 | Testing | **pytest** | Unit/integration tests + metrics harness | MIT |
 
-> **No paid service, no Firebase/AWS/Thingspeak.** All transport/storage is local (Mosquitto + SQLite).
+> **Closed-Source / Cloud Model Notice:** Using cloud-based closed-source models (Gemini, GPT, Azure, etc.) requires an active internet connection and valid API keys with cloud billing enabled. Open-source options (Ollama, MediaPipe, etc.) run completely locally, offline, and free of charge.
 
-### 2.1 Pre-trained models — selection & no-training guarantee
-| Modality | Model | How used | Fallback |
+### 2.1 Pre-trained models — selection & options
+| Modality | Open-Source Options (Local & Free) | Closed-Source Options (Cloud API & Paid) | How Used |
 |---|---|---|---|
-| **Video** | **MediaPipe Pose** (pretrained landmark model) | Detect 33 landmarks → geometric posture/fall rules (deterministic; no training). | None needed (rules are deterministic). |
-| **Sensor** | A **pre-trained HAR classifier from HuggingFace Hub** (e.g., a time-series/IMU HAR model card tagged *human-activity-recognition*), loaded **inference-only**. Implementer pins one model id at build time and maps its label set to our class set (§5.2). | Classify each feature window → `{label, confidence}`. | **Statistical/zero-shot fallback** (FR-S6): threshold heuristics on features, or a zero-shot classification prompt to the local LLM. |
-| **Feedback** | **Ollama** small open LLM (Llama 3.2 3B default) | Natural-language feedback/alerts/summaries from structured timeline. | Smaller model (Phi-3-mini) if RAM-constrained; or template-based text if LLM unavailable. |
+| **Video** | **MediaPipe Pose** (33 landmarks) or **YOLOv8/YOLOv11 Pose** | **Google Cloud Video Intelligence** or **Azure Spatial Analysis** | Detect body joint coordinates / landmarks → run deterministic geometric rules to identify sitting, standing, walking, lying down, or falling. |
+| **Sensor** | Pre-trained HAR classifiers from HuggingFace Hub (CNN, LSTM, or Transformer-based models) | **Google Cloud AutoML Tables** or custom cloud-deployed tabular endpoints | Classify features from simulated wearable sensor windows → output `{label, confidence}`. Falls back to statistical rules or LLM zero-shot prompts. |
+| **Feedback** | **Llama 3.2 (1B/3B)**, **Qwen2.5 (1.5B/3B)**, or **Phi-3-mini** via Ollama | **Google Gemini 1.5 Flash**, **OpenAI GPT-4o-mini**, or **Claude 3 Haiku** | Generate natural-language feedback, alerts, and summaries based on structured timeline data from the database. |
 
-> If no single HF HAR model maps cleanly to our six classes during the build, the **fallback path is
-> authoritative** and still satisfies the "no custom training" rule — both options use only
-> pre-existing logic/models.
+> Using open-source models guarantees offline capabilities and zero cloud billing. If closed-source APIs are chosen during deployment, the team must configure the respective client libraries (e.g., `google-genai` or `openai`) and provide valid API keys.
 
 ---
 
@@ -163,7 +156,7 @@ config from environment variables / a shared config file (FR-X4); logs structure
 ### 3.3 Fusion / HAR Service  *(implements FR-F1…FR-F7)*
 - **Responsibility:** Produce the single authoritative activity + events.
 - **Inputs:** MQTT `har/sensor/prediction`, `har/video/prediction`.
-- **Outputs:** MQTT `har/activity` (continuous), `har/event` (fall/abnormal); writes to SQLite.
+- **Outputs:** MQTT `har/activity` (continuous), `har/event` (fall/abnormal); writes to PostgreSQL.
 - **Algorithm:**
   1. **Time alignment:** buffer recent predictions per modality; align by timestamp into intervals
      (e.g., 1 s).
@@ -178,18 +171,16 @@ config from environment variables / a shared config file (FR-X4); logs structure
      condition holds (false-alarm control, NFR-2). Temporal smoothing prevents duplicate alerts.
   5. **Abnormal/inactivity (FR-F6):** track time-in-activity; raise `INACTIVITY` after a configurable
      stillness threshold; raise `ABNORMAL_PATTERN` on large deviation from recent baseline.
-  6. Persist each fused activity + event to SQLite; publish to dashboard.
+  6. Persist each fused activity + event to PostgreSQL; publish to dashboard.
 - **Config:** `MODALITY_WEIGHTS`, `SMOOTHING_WINDOW`, `FALL_ACCEL_THRESHOLD`,
   `INACTIVITY_SECONDS`, `FUSION_INTERVAL`.
 
 ### 3.4 Feedback Service (GenAI)  *(implements FR-G1…FR-G6)*
-- **Responsibility:** Generate plain-language feedback, alert text, and summaries via the local LLM.
-- **Inputs:** MQTT `har/event` (triggers immediate alert text); periodic reads of the SQLite timeline
+- **Responsibility:** Generate plain-language feedback, alert text, and summaries via the GenAI model.
+- **Inputs:** MQTT `har/event` (triggers immediate alert text); periodic reads of the PostgreSQL timeline
   (for feedback/summary).
-- **Outputs:** Structured feedback objects stored in SQLite + pushed to dashboard via WebSocket/REST.
-- **LLM integration:** calls **Ollama**'s local API; model id from config (`LLM_MODEL`, default
-  `llama3.2:3b`). Prompts use **templates** + **structured (JSON) output** so the dashboard can render
-  fields reliably (FR-G5).
+- **Outputs:** Structured feedback objects stored in PostgreSQL + pushed to dashboard via WebSocket/REST.
+- **LLM integration:** calls either local **Ollama** API (for open-source models like Llama 3.2 3B) or cloud APIs (for closed-source models like Google Gemini, OpenAI GPT, or Anthropic Claude). Prompts use **templates** + **structured (JSON) output** so the dashboard can render fields reliably (FR-G5).
 - **Prompt design:**
   - *System role:* "You are a careful assistant that summarizes a patient's recent physical activity
     for caregivers. Be concise, use plain language, **never diagnose**, **always include a brief
@@ -203,7 +194,7 @@ config from environment variables / a shared config file (FR-X4); logs structure
   - **Summary mode** (scheduled): daily/periodic recap (FR-G3).
 - **Failure modes:** LLM unreachable → template-based fallback text so the dashboard still shows
   something; offline operation supported once the model is pulled (FR-G6, NFR-8).
-- **Config:** `LLM_MODEL`, `OLLAMA_HOST`, `FEEDBACK_INTERVAL`, `SUMMARY_SCHEDULE`.
+- **Config:** `LLM_MODEL`, `OLLAMA_HOST` (if using Ollama), `GEMINI_API_KEY`/`OPENAI_API_KEY` (if using cloud APIs), `FEEDBACK_INTERVAL`, `SUMMARY_SCHEDULE`.
 
 ### 3.5 Dashboard Service  *(implements FR-D1…FR-D7)*
 - **Stack:** React + Vite SPA; Recharts for charts; native WebSocket client for live updates; REST for
@@ -299,35 +290,35 @@ config from environment variables / a shared config file (FR-X4); logs structure
 { "channel": "event", "data": { "...one of the JSON payloads above..." } }
 ```
 
-### 4.4 SQLite schema (DDL)
+### 4.4 PostgreSQL schema (DDL)
 ```sql
 CREATE TABLE activity_timeline (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts           TEXT    NOT NULL,         -- ISO-8601 UTC
-  activity     TEXT    NOT NULL,         -- WALKING|SITTING|STANDING|LYING|EXERCISING|UNKNOWN
-  confidence   REAL    NOT NULL,
-  sensor_label TEXT,
-  video_label  TEXT
+  id           SERIAL PRIMARY KEY,
+  ts           TIMESTAMPTZ NOT NULL,      -- timezone-aware timestamp
+  activity     VARCHAR(20) NOT NULL,      -- WALKING|SITTING|STANDING|LYING|EXERCISING|UNKNOWN
+  confidence   DOUBLE PRECISION NOT NULL,
+  sensor_label VARCHAR(20),
+  video_label  VARCHAR(20)
 );
 
 CREATE TABLE events (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts           TEXT    NOT NULL,
-  type         TEXT    NOT NULL,         -- FALL|INACTIVITY|ABNORMAL_PATTERN
-  severity     TEXT    NOT NULL,         -- info|warning|critical
-  confidence   REAL    NOT NULL,
-  evidence     TEXT,                     -- JSON blob
-  acknowledged INTEGER NOT NULL DEFAULT 0
+  id           SERIAL PRIMARY KEY,
+  ts           TIMESTAMPTZ NOT NULL,
+  type         VARCHAR(20) NOT NULL,      -- FALL|INACTIVITY|ABNORMAL_PATTERN
+  severity     VARCHAR(10) NOT NULL,      -- info|warning|critical
+  confidence   DOUBLE PRECISION NOT NULL,
+  evidence     JSONB,                     -- JSONB blob for unstructured metadata
+  acknowledged BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE feedback (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts           TEXT    NOT NULL,
-  mode         TEXT    NOT NULL,         -- alert|feedback|summary
-  headline     TEXT,
+  id           SERIAL PRIMARY KEY,
+  ts           TIMESTAMPTZ NOT NULL,
+  mode         VARCHAR(20) NOT NULL,      -- alert|feedback|summary
+  headline     VARCHAR(100),
   detail       TEXT,
-  severity     TEXT,
-  payload      TEXT                      -- full JSON (recommendations[], disclaimer, ...)
+  severity     VARCHAR(10),
+  payload      JSONB                      -- full JSON structure (recommendations[], disclaimer, etc.)
 );
 
 CREATE INDEX idx_timeline_ts ON activity_timeline(ts);
@@ -391,7 +382,7 @@ HAR-System/
 │   ├── schemas.py           # pydantic models for all JSON payloads
 │   ├── topics.py            # MQTT topic constants
 │   ├── labels.py            # canonical activity/event labels + mapping
-│   └── db.py                # SQLite helpers + DDL
+│   └── db.py                # PostgreSQL helpers + DDL
 ├── dashboard/               # React + Vite app
 │   ├── src/components/...    # StatusBar, FallAlertBanner, LiveMonitor, ...
 │   └── src/api/             # REST + WebSocket clients
@@ -411,22 +402,25 @@ services agree (single source of truth for FR-X4 config & data contracts).
 
 All tunables are environment variables (documented in `.env.example`), satisfying FR-X4 / NFR-9:
 
-| Variable | Default | Used by |
-|---|---|---|
-| `MQTT_HOST` / `MQTT_PORT` | `localhost` / `1883` | all |
-| `SQLITE_PATH` | `./data/har.db` | fusion, feedback |
-| `WINDOW_SIZE` / `WINDOW_OVERLAP` | `128` / `0.5` | sensor |
-| `SENSOR_MODEL_ID` | *(pinned HF model id)* | sensor |
-| `USE_FALLBACK` | `false` | sensor |
-| `FPS` | `12` | video |
-| `HORIZONTAL_ANGLE_THRESHOLD` | `~60°` | video, fusion |
-| `MODALITY_WEIGHTS` | `sensor=0.5,video=0.5` | fusion |
-| `SMOOTHING_WINDOW` | `5` | fusion |
-| `FALL_ACCEL_THRESHOLD` | *(tuned on SisFall)* | fusion |
-| `INACTIVITY_SECONDS` | `1800` | fusion |
-| `LLM_MODEL` | `llama3.2:3b` | feedback |
-| `OLLAMA_HOST` | `http://localhost:11434` | feedback |
-| `DATASET` | `uci-har` | simulator |
+| Variable | Default | Used by | Description / Options |
+|---|---|---|---|
+| `MQTT_HOST` / `MQTT_PORT` | `localhost` / `1883` | all | MQTT broker address and port. |
+| `DATABASE_URL` | `postgresql://user:pass@db:5432/hardb` | fusion, feedback | Connection string for PostgreSQL database. |
+| `WINDOW_SIZE` / `WINDOW_OVERLAP` | `128` / `0.5` | sensor | Sliding window parameters for sensor features. |
+| `SENSOR_MODEL_ID` | *(pinned HF model id)* | sensor | Pre-trained model ID from HuggingFace Hub. |
+| `USE_FALLBACK` | `false` | sensor | Enable statistical heuristic rules as fallback. |
+| `FPS` | `12` | video | Webcam capture frame rate. |
+| `HORIZONTAL_ANGLE_THRESHOLD` | `~60°` | video, fusion | Pitch angle threshold to identify horizontal body posture. |
+| `MODALITY_WEIGHTS` | `sensor=0.5,video=0.5` | fusion | Late fusion voting weights per modality. |
+| `SMOOTHING_WINDOW` | `5` | fusion | Window size for temporal label smoothing. |
+| `FALL_ACCEL_THRESHOLD` | *(tuned on SisFall)* | fusion | Acceleration magnitude spike threshold for fall detection. |
+| `INACTIVITY_SECONDS` | `1800` | fusion | Threshold duration for prolonged inactivity detection. |
+| `LLM_PROVIDER` | `ollama` | feedback | GenAI provider: `ollama` (open-source) or `gemini` / `openai` / `anthropic` (closed-source APIs). |
+| `LLM_MODEL` | `llama3.2:3b` | feedback | Model identifier (e.g., `llama3.2:3b` for Ollama, `gemini-1.5-flash` for Gemini API). |
+| `OLLAMA_HOST` | `http://localhost:11434` | feedback | Local Ollama endpoint url (only if provider is `ollama`). |
+| `GEMINI_API_KEY` | *(optional)* | feedback | Google Gemini API key (required if provider is `gemini`). |
+| `OPENAI_API_KEY` | *(optional)* | feedback | OpenAI API key (required if provider is `openai`). |
+| `DATASET` | `uci-har` | simulator | Dataset directory to stream simulated IMU windows. |
 
 ---
 
@@ -439,7 +433,7 @@ sequenceDiagram
     participant SEN as Sensor Svc
     participant VID as Video Svc
     participant FUS as Fusion Svc
-    participant DB as SQLite
+    participant DB as PostgreSQL
     participant DASH as Dashboard
 
     SIM->>SEN: har/sensor/raw (IMU window)
@@ -457,8 +451,8 @@ sequenceDiagram
     participant SEN as Sensor Svc
     participant VID as Video Svc
     participant FUS as Fusion Svc
-    participant FB as Feedback Svc (Ollama)
-    participant DB as SQLite
+    participant FB as Feedback Svc (LLM)
+    participant DB as PostgreSQL
     participant DASH as Dashboard
 
     SEN->>FUS: prediction {motion_intensity high}
@@ -467,7 +461,7 @@ sequenceDiagram
     FUS->>DB: insert events(type=FALL, critical)
     FUS-->>FB: har/event {FALL}
     FUS-->>DASH: WS {channel:"event", data:{FALL}}
-    FB->>FB: prompt local LLM (alert mode, structured)
+    FB->>FB: prompt LLM (alert mode, structured)
     FB->>DB: insert feedback(mode=alert)
     FB-->>DASH: WS {channel:"feedback", data:{headline, detail, disclaimer}}
     DASH->>DASH: show red FallAlertBanner + AI message
@@ -482,7 +476,7 @@ sequenceDiagram
 | **Unit** | Feature math (mean/std/SMA/tilt), geometric rule thresholds, fusion voting & smoothing, fall rule, label mapping. | pytest |
 | **Integration** | MQTT round-trip (publish raw → sensor prediction → fusion activity), DB writes, WS push. | pytest + local Mosquitto |
 | **Contract** | All payloads validate against `shared/schemas.py` (pydantic). | pytest |
-| **GenAI** | Feedback returns required structured fields + disclaimer; alert mode produces critical severity. | pytest (mock + live Ollama) |
+| **GenAI** | Feedback returns required structured fields + disclaimer; alert mode produces critical severity. | pytest (mock + live LLM) |
 | **Metrics harness** (FR-X5, NFR-2) | Replay a **labeled** dataset, collect fused predictions, compute **per-class F1**, **fall precision/recall**, and **end-to-end latency**; compare **fusion vs sensor-only vs video-only**. | `tests/metrics/` |
 
 **Metrics harness output (for the report):** a table of `{method: F1}` for Sensor-only / Video-only /
@@ -494,35 +488,37 @@ Fusion, plus fall `precision`/`recall` and average latency — directly populati
 
 ### 10.1 Prerequisites
 - Docker + docker-compose, Python 3.11+, Node 18+ (for dashboard dev), a working webcam.
-- **Ollama** installed locally; pull the model once: `ollama pull llama3.2:3b`.
+- **PostgreSQL** running containerized or locally.
+- *(Optional)* **Ollama** installed locally (only required if running local open-source LLMs); pull the model: `ollama pull llama3.2:3b`.
 - Download a dataset (e.g., UCI HAR / SisFall) into `data/` (one-time, online).
 
 ### 10.2 Run
 ```bash
-# 1) one-time: pull the local LLM and datasets
+# 1) one-time: pull the local LLM (if using Ollama) and datasets
 ollama pull llama3.2:3b
 python simulator/datasets/download.py --dataset uci-har   # fetches into data/
 
-# 2) start everything (Mosquitto + 4 services + dashboard)
+# 2) start everything (Mosquitto + PostgreSQL + 4 services + dashboard)
 docker-compose up --build
 
-# 3) start the sensor replay (no hardware needed)
+# 3) start the sensor replay (no hardware needed, software simulator only)
 python simulator/replay.py --dataset uci-har --realtime
 
 # 4) open the dashboard
 #    http://localhost:5173   (Vite dev)  or the compose-exposed port
 ```
-`docker-compose` brings up: `mosquitto`, `sensor_service`, `video_service`, `fusion_service`,
+`docker-compose` brings up: `db` (PostgreSQL), `mosquitto`, `sensor_service`, `video_service`, `fusion_service`,
 `feedback_service`, `dashboard`. The video service uses the host webcam (device passthrough).
 
 ### 10.3 Ports (indicative)
-| Service | Port |
-|---|---|
-| Mosquitto (MQTT) | 1883 |
-| Fusion API/WS | 8001 |
-| Feedback API/WS | 8002 |
-| Ollama | 11434 |
-| Dashboard | 5173 |
+| Service | Port | Description |
+|---|---|---|
+| PostgreSQL (DB) | 5432 | Primary database storage |
+| Mosquitto (MQTT) | 1883 | Message broker |
+| Fusion API/WS | 8001 | Fused activity & alerts API |
+| Feedback API/WS | 8002 | GenAI text generation API |
+| Ollama | 11434 | Local LLM host (optional) |
+| Dashboard | 5173 | User interface dashboard |
 
 ---
 
@@ -539,20 +535,16 @@ to parallelize:
 | 4 | Video & pose | **Video Service**: MediaPipe + geometric rules (no training). | Dev B |
 | 5 | Sensor model | **Sensor Service**: features + pre-trained HF model + fallback. | Dev A |
 | 6 | Multi-modal fusion | **Fusion Service**: confidence-weighted voting + smoothing + fall rule. | Dev C |
-| 7 | Cloud/real-time | Replace cloud with **MQTT + SQLite**; wire end-to-end real-time. | Dev C |
+| 7 | Cloud/real-time | Replace cloud with **MQTT + PostgreSQL**; wire end-to-end real-time. | Dev C |
 | 8 | Dashboard | **React + Vite** dashboard (live + history + trends). | Dev D |
-| 9 | Feedback engine | **Feedback Service** with **Ollama** (feedback/alerts/summaries). | Dev B/D |
+| 9 | Feedback engine | **Feedback Service** with **LLM Integration (Ollama / Cloud APIs)**. | Dev B/D |
 | 10 | Testing & report | **Metrics harness**, demo checklist (FSD §11), PPT/report. | All |
 
 ---
 
 ## 12. Optional Future Hardware Path (documented, not built)
 
-For teams that later obtain hardware, the **same software pipeline** is reused: an **ESP32 + MPU6050**
-reads the IMU, formats the `har/sensor/raw` JSON, and publishes to Mosquitto over Wi-Fi (MQTT) —
-replacing the simulator with zero changes downstream. This preserves the IoT narrative without making
-the demo depend on hardware. (Also future: ECG/SpO2 sensors, LSTM/Transformer models, edge-AI
-accelerators, multi-person tracking, telemedicine — see FSD Future Scope.)
+The project focuses strictly on a **software-only model** deployment. For teams that later choose to incorporate hardware, the **same software pipeline** can be extended: a physical microcontroller like an **ESP32 + MPU6050 IMU sensor** can read physical motions, format them to match the `har/sensor/raw` JSON schema, and publish to Mosquitto over Wi-Fi (MQTT) — replacing the software simulator with zero changes downstream. (Other future expansions include: heart rate sensors, custom physical cameras, multi-person tracking, and edge-AI accelerators.)
 
 ---
 
@@ -561,7 +553,7 @@ accelerators, multi-person tracking, telemedicine — see FSD Future Scope.)
 | Risk | Mitigation |
 |---|---|
 | HF HAR model labels don't map to our 6 classes. | Label-mapping table (§5.2) + statistical/zero-shot fallback (FR-S6). |
-| Local LLM latency on CPU. | Small 3B model; feedback on-demand/periodic, not per-frame; template fallback. |
+| Local LLM latency on CPU. | Small 3B model (if local Ollama is chosen); run feedback generation on-demand or periodically, not per-frame; template-based text fallback. |
 | Webcam rule misclassification. | Fusion + temporal smoothing; tune thresholds via config. |
 | Time-sync drift between modalities. | Timestamp every message; align in fusion buffer with tolerance window. |
 | False fall alarms. | Require both modalities for high-confidence fall; hysteresis smoothing. |
@@ -569,12 +561,12 @@ accelerators, multi-person tracking, telemedicine — see FSD Future Scope.)
 
 ---
 
-## 14. Open-Source / Cost Compliance Checklist
+## 14. Compliance Checklist
 
-- [ ] Every dependency in §2 is OSS with a permissive/open license.
-- [ ] No Firebase/AWS/Thingspeak or any paid/billed service is used (MQTT + SQLite are local).
-- [ ] No model is trained or fine-tuned — only pre-trained MediaPipe, HF HAR model, and Ollama LLM.
-- [ ] System runs fully offline after one-time downloads (NFR-8).
+- [ ] Every dependency in §2 matches open-source licensing or has cloud credentials configured if using closed-source APIs.
+- [ ] Centralized database is fully migrated to PostgreSQL, containerized in docker-compose.
+- [ ] If using cloud-based closed-source models (Gemini, GPT, Azure), verify active internet connection and valid API keys.
+- [ ] No custom model training is performed — only pre-trained inference models (e.g., MediaPipe/YOLO Pose, HF models, local Ollama or cloud GenAI).
 - [ ] Raw video is never stored or transmitted (NFR-3, FR-V5).
 
 ---
