@@ -8,6 +8,7 @@ connection from a PostgreSQL URL for normal runtime use.
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,8 @@ SELECT
     AND to_regclass('idx_timeline_ts') IS NOT NULL
     AND to_regclass('idx_events_ts') IS NOT NULL
     AND to_regclass('idx_feedback_ts') IS NOT NULL
+    AND to_regclass('idx_timeline_unique_ts') IS NOT NULL
+    AND to_regclass('idx_events_unique_type_ts') IS NOT NULL
 """
 
 
@@ -105,12 +108,15 @@ def _insert_returning_id(connection: Connection, query: str, params: tuple[Any, 
 
 
 def insert_activity(connection: Connection, activity: FusedActivity) -> int:
+    """Store one interval exactly once and return its stable database ID."""
+
     return _insert_returning_id(
         connection,
         """
         INSERT INTO activity_timeline
             (ts, activity, confidence, sensor_label, video_label)
         VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (ts) DO UPDATE SET ts = EXCLUDED.ts
         RETURNING id
         """,
         (
@@ -124,11 +130,14 @@ def insert_activity(connection: Connection, activity: FusedActivity) -> int:
 
 
 def insert_event(connection: Connection, event: HAREvent) -> int:
+    """Store one event exactly once and return its stable database ID."""
+
     return _insert_returning_id(
         connection,
         """
         INSERT INTO events (ts, type, severity, confidence, evidence)
         VALUES (%s, %s, %s, %s, %s::jsonb)
+        ON CONFLICT (type, ts) DO UPDATE SET ts = EXCLUDED.ts
         RETURNING id
         """,
         (event.ts, event.type, event.severity, event.confidence, json.dumps(event.evidence)),
@@ -169,11 +178,42 @@ def _fetch_dicts(
     return [dict(zip(columns, row, strict=True)) for row in rows]
 
 
+def _fetch_one_dict(
+    connection: Connection, query: str, params: tuple[Any, ...]
+) -> dict[str, Any] | None:
+    with connection.cursor() as cursor:
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+    return dict(zip(columns, row, strict=True))
+
+
 def _validate_limit(limit: int) -> None:
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise TypeError("limit must be an integer")
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
+
+
+def _validate_time_range(from_ts: datetime, to_ts: datetime) -> None:
+    for name, value in (("from_ts", from_ts), ("to_ts", to_ts)):
+        if not isinstance(value, datetime):
+            raise TypeError(f"{name} must be a datetime")
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"{name} must be timezone-aware UTC")
+        if value.utcoffset() != timedelta(0):
+            raise ValueError(f"{name} must use UTC")
+    if from_ts > to_ts:
+        raise ValueError("from_ts must not be after to_ts")
+
+
+def _validate_record_id(record_id: int, name: str) -> None:
+    if isinstance(record_id, bool) or not isinstance(record_id, int):
+        raise TypeError(f"{name} must be an integer")
+    if record_id < 1:
+        raise ValueError(f"{name} must be positive")
 
 
 def get_recent_activities(connection: Connection, limit: int = 100) -> list[dict[str, Any]]:
@@ -214,18 +254,157 @@ def get_recent_feedback(connection: Connection, limit: int = 100) -> list[dict[s
     )
 
 
+def get_latest_activity(connection: Connection) -> dict[str, Any] | None:
+    """Return the authoritative current activity, or ``None`` for an empty timeline."""
+
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, activity, confidence, sensor_label, video_label
+        FROM activity_timeline ORDER BY ts DESC, id DESC LIMIT 1
+        """,
+        (),
+    )
+
+
+def get_latest_event(connection: Connection) -> dict[str, Any] | None:
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, type, severity, confidence, evidence, acknowledged
+        FROM events ORDER BY ts DESC, id DESC LIMIT 1
+        """,
+        (),
+    )
+
+
+def get_activities_between(
+    connection: Connection,
+    from_ts: datetime,
+    to_ts: datetime,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Return timeline records in deterministic chronological order."""
+
+    _validate_time_range(from_ts, to_ts)
+    _validate_limit(limit)
+    return _fetch_dicts(
+        connection,
+        """
+        SELECT id, ts, activity, confidence, sensor_label, video_label
+        FROM activity_timeline
+        WHERE ts >= %s AND ts <= %s
+        ORDER BY ts ASC, id ASC LIMIT %s
+        """,
+        (from_ts, to_ts, limit),
+    )
+
+
+def get_events_between(
+    connection: Connection,
+    from_ts: datetime,
+    to_ts: datetime,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Return safety events in deterministic chronological order."""
+
+    _validate_time_range(from_ts, to_ts)
+    _validate_limit(limit)
+    return _fetch_dicts(
+        connection,
+        """
+        SELECT id, ts, type, severity, confidence, evidence, acknowledged
+        FROM events
+        WHERE ts >= %s AND ts <= %s
+        ORDER BY ts ASC, id ASC LIMIT %s
+        """,
+        (from_ts, to_ts, limit),
+    )
+
+
+def get_activity_trends(
+    connection: Connection,
+    from_ts: datetime,
+    to_ts: datetime,
+    max_interval_seconds: float = 5.0,
+) -> list[dict[str, Any]]:
+    """Aggregate activity counts and bounded observed duration for a UTC range.
+
+    Capping every interval prevents the last row, or a gap while the service was
+    offline, from being counted as continuous patient activity.
+    """
+
+    _validate_time_range(from_ts, to_ts)
+    if isinstance(max_interval_seconds, bool) or not isinstance(max_interval_seconds, int | float):
+        raise TypeError("max_interval_seconds must be a number")
+    if not 0 < max_interval_seconds <= 86_400:
+        raise ValueError("max_interval_seconds must be between 0 and 86400")
+    return _fetch_dicts(
+        connection,
+        """
+        WITH ordered AS (
+            SELECT
+                ts,
+                activity,
+                LEAD(ts) OVER (ORDER BY ts ASC, id ASC) AS next_ts
+            FROM activity_timeline
+            WHERE ts >= %s AND ts <= %s
+        ), bounded AS (
+            SELECT
+                activity,
+                ts,
+                LEAST(
+                    COALESCE(next_ts, %s),
+                    ts + (%s * INTERVAL '1 second'),
+                    %s
+                ) AS interval_end
+            FROM ordered
+        )
+        SELECT
+            activity,
+            COUNT(*)::INTEGER AS count,
+            COALESCE(
+                SUM(GREATEST(EXTRACT(EPOCH FROM interval_end - ts), 0)),
+                0
+            )::DOUBLE PRECISION AS duration_seconds
+        FROM bounded
+        GROUP BY activity
+        ORDER BY activity ASC
+        """,
+        (from_ts, to_ts, to_ts, float(max_interval_seconds), to_ts),
+    )
+
+
+def get_event(connection: Connection, event_id: int) -> dict[str, Any] | None:
+    _validate_record_id(event_id, "event_id")
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, type, severity, confidence, evidence, acknowledged
+        FROM events WHERE id = %s
+        """,
+        (event_id,),
+    )
+
+
 def acknowledge_event(connection: Connection, event_id: int) -> bool:
-    if event_id < 1:
-        raise ValueError("event_id must be positive")
+    """Mark an event acknowledged and return whether that event exists.
+
+    PostgreSQL counts the unconditional update even when the value was already
+    true, making repeated acknowledgement idempotently return ``True`` while an
+    unknown ID returns ``False``.
+    """
+
+    _validate_record_id(event_id, "event_id")
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "UPDATE events SET acknowledged = TRUE WHERE id = %s AND acknowledged = FALSE",
+                "UPDATE events SET acknowledged = TRUE WHERE id = %s",
                 (event_id,),
             )
-            changed = cursor.rowcount == 1
+            exists = cursor.rowcount == 1
         connection.commit()
-        return changed
+        return exists
     except Exception:
         connection.rollback()
         raise
@@ -251,6 +430,22 @@ class ActivityRepository(BaseRepository):
         with self.connection() as connection:
             return get_recent_activities(connection, limit)
 
+    def latest(self) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_latest_activity(connection)
+
+    def between(
+        self, from_ts: datetime, to_ts: datetime, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return get_activities_between(connection, from_ts, to_ts, limit)
+
+    def trends(
+        self, from_ts: datetime, to_ts: datetime, max_interval_seconds: float = 5.0
+    ) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return get_activity_trends(connection, from_ts, to_ts, max_interval_seconds)
+
 
 class EventRepository(BaseRepository):
     def add(self, event: HAREvent) -> int:
@@ -260,6 +455,20 @@ class EventRepository(BaseRepository):
     def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connection() as connection:
             return get_recent_events(connection, limit)
+
+    def latest(self) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_latest_event(connection)
+
+    def get(self, event_id: int) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_event(connection, event_id)
+
+    def between(
+        self, from_ts: datetime, to_ts: datetime, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return get_events_between(connection, from_ts, to_ts, limit)
 
     def acknowledge(self, event_id: int) -> bool:
         with self.connection() as connection:
