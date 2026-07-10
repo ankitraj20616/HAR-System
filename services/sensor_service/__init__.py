@@ -1,0 +1,1 @@
+"""Sensor ingestion service package."""
