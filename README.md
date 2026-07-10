@@ -1,13 +1,14 @@
 # HAR System
 
-A software-only, privacy-first Human Activity Recognition foundation for patient monitoring. Milestone
-1 provides shared message contracts, PostgreSQL persistence, an MQTT broker, four FastAPI service
-skeletons, and a dashboard placeholder. Real activity recognition, fusion, GenAI, and the finished
-dashboard are delivered in later milestones.
+A software-only, privacy-first Human Activity Recognition system for patient monitoring. Milestone 2
+adds independent real-time sensor and webcam recognition: public IMU dataset replay, fixed-window
+sensor features with pinned local model/fallback inference, and MediaPipe pose geometry that never
+stores or transmits raw frames. Fusion, GenAI, and the finished dashboard remain later milestones.
 
 ## Start everything with one command
 
-Prerequisites: Docker Engine with Docker Compose v2 and at least 8 GB RAM.
+Prerequisites: Docker Engine with Docker Compose v2 and at least 8 GB RAM. Live webcam passthrough
+through Compose is supported on Linux; other platforms should run the video service on the host.
 
 ```bash
 docker compose up --build --wait
@@ -36,6 +37,48 @@ docker compose down
 
 To intentionally erase local PostgreSQL and Mosquitto data, use `docker compose down --volumes`.
 
+The default stack remains healthy when no webcam or sensor model is available: the affected service
+reports `degraded`, video keeps retrying, and sensor inference uses the configured deterministic
+fallback. For a Linux webcam demo, use the optional device overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.webcam.yml up --build --wait
+```
+
+Set `VIDEO_DEVICE` and `VIDEO_GID` if the camera is not `/dev/video0` or its host group is not `44`.
+
+## Replay a public sensor dataset
+
+UCI HAR is the default loader; WISDM and SisFall loader paths are also implemented. Dataset labels
+are evaluation-only metadata and are never placed in `har/sensor/raw`:
+
+```bash
+python -m simulator.replay --dataset uci-har \
+  --dataset-path "data/UCI HAR Dataset" --realtime --speed 1 \
+  --ground-truth-file data/metrics/ground-truth.jsonl
+```
+
+Use `--loop`, `--scenario GLOB`, `--device-id`, `--no-realtime`, or `--skip-malformed` as needed.
+The programmatic `ReplayRunner` additionally supports start, pause, resume, and stop controls.
+
+## Optional pinned sensor model
+
+The sensor adapter targets `STMicroelectronics/IGN-HAR-model` at revision
+`69f07d89b9520c9ab4424fafed6d079c3d12b26d`. The model card specifies FLOAT32 accelerometer input
+shaped `[1, window, 3, 1]`, gravity preprocessing, and the SLA0044 license. Review that license before
+using the artifact. The application deliberately performs no model download at runtime.
+
+To enable local inference, place an exact `.tflite` artifact under `data/models/`, then configure:
+
+```dotenv
+SENSOR_MODEL_PATH=/models/your-pinned-model.tflite
+SENSOR_MODEL_LABELS=STATIONARY,WALKING,EXERCISING,STAIRS
+USE_FALLBACK=true
+```
+
+`SENSOR_MODEL_LABELS` must match the artifact output order. Ambiguous/unmapped labels become
+`UNKNOWN`; `STAIRS` maps to `WALKING`, while biking/jogging map to `EXERCISING`.
+
 ## Services and ports
 
 | Component | Local address | Purpose |
@@ -43,8 +86,8 @@ To intentionally erase local PostgreSQL and Mosquitto data, use `docker compose 
 | Dashboard | <http://localhost:5173> | Milestone 1 readiness page |
 | Fusion service | <http://localhost:8001/health> | Fusion API skeleton and database/MQTT health |
 | Feedback service | <http://localhost:8002/health> | Feedback API skeleton and database/MQTT health |
-| Sensor service | <http://localhost:8003/health> | Sensor API skeleton and MQTT health |
-| Video service | <http://localhost:8004/health> | Video API skeleton and MQTT health |
+| Sensor service | <http://localhost:8003/health> | Window/features/model-fallback inference and MQTT health |
+| Video service | <http://localhost:8004/health> | Webcam/pose/activity rules and MQTT/camera health |
 | Mosquitto | `localhost:1883` | MQTT message broker |
 | PostgreSQL | `localhost:5432` | Timeline, events, and feedback persistence |
 
@@ -65,7 +108,7 @@ MQTT publish/subscribe round trip, and checks that all three database tables exi
 It stops the stack afterward but preserves named volumes. Set `SMOKE_KEEP_RUNNING=true` to leave it
 running after verification.
 
-For local Python development:
+For local Python development (Python 3.11 or 3.12):
 
 ```bash
 python3.11 -m venv .venv
@@ -80,32 +123,39 @@ Alternatively, `uv sync --frozen` installs the same pinned runtime and developme
 `uv.lock`.
 
 CI runs the same formatting, lint, and test checks and also validates and builds every Compose image.
+The Milestone 2 suite covers dataset parsing/replay, feature formulas, window overlap, local-model
+adapters, MQTT contracts, synthetic postures/motion, camera lifecycle, and a privacy audit.
 
 ## Configuration
 
 All configuration is environment-driven. [.env.example](.env.example) documents safe development
-defaults for service ports, logging, schema version, sensor windows, video settings, fusion thresholds,
-and feedback-provider selection. Secrets must be supplied only through an untracked `.env` or another
-secret manager. The default feedback provider is a deterministic offline template and needs no API key.
+defaults for service ports, logging, schema version, sensor windows/model preprocessing, video
+thresholds and reconnect backoff, fusion thresholds, and feedback-provider selection. Secrets must be
+supplied only through an untracked `.env` or another secret manager. The default feedback provider is
+a deterministic offline template and needs no API key.
 
 ## Repository map
 
 ```text
 services/       Four FastAPI backend services
 shared/         Canonical labels, topics, schemas, configuration, logging, and database helpers
-simulator/      Software sensor-stream placeholder
+simulator/      UCI HAR/WISDM/SisFall loaders and real-time MQTT replay
 dashboard/      Milestone 1 health-capable dashboard placeholder
 mosquitto/      Local broker configuration
 tests/          Unit, contract, and integration tests
 core_docs/      Functional and technical specifications plus milestone plans
 ```
 
-See [Milestone 1 FSD](core_docs/milestones/milestone-1-foundation/FSD.md) and
-[Milestone 1 TDD](core_docs/milestones/milestone-1-foundation/TDD.md) for scope and acceptance criteria.
+See [Milestone 2 FSD](core_docs/milestones/milestone-2-single-modality/FSD.md),
+[Milestone 2 TDD](core_docs/milestones/milestone-2-single-modality/TDD.md), and
+[Milestone 2 implementation notes](core_docs/milestones/milestone-2-single-modality/IMPLEMENTATION.md)
+for scope and acceptance criteria. Fusion-ready fixtures are in
+`tests/fixtures/milestone2_predictions.json`.
 
 ## Privacy and safety
 
-- Raw camera frames must never be stored or published.
+- Raw camera frames must never be stored, encoded, logged, or published; only numeric prediction
+  contracts leave the video service.
 - Logs must not contain full sensor windows, frames, secrets, or API keys.
 - This academic prototype is an assistive tool, not a medical device or diagnosis system.
 - Dataset files and model weights belong under `data/`, which is intentionally ignored by Git.

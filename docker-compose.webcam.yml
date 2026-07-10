@@ -1,0 +1,8 @@
+# Optional Linux webcam passthrough. The base Compose stack deliberately keeps
+# the video service alive in degraded mode on hosts without /dev/video0.
+services:
+  video-service:
+    devices:
+      - "${VIDEO_DEVICE:-/dev/video0}:/dev/video0"
+    group_add:
+      - "${VIDEO_GID:-44}"

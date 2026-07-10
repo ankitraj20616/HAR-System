@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "clock": {
+    "timestamps": "UTC ISO-8601",
+    "pacing": "monotonic clock",
+    "sensor_window_samples": 128,
+    "sensor_overlap": 0.5,
+    "video_target_fps": 12
+  },
+  "scenarios": [
+    {
+      "name": "agreement",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:00.000Z",
+        "modality": "sensor",
+        "label": "WALKING",
+        "confidence": 0.88,
+        "motion_intensity": 0.31
+      },
+      "video": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:00.050Z",
+        "modality": "video",
+        "label": "WALKING",
+        "confidence": 0.81,
+        "orientation": "vertical"
+      }
+    },
+    {
+      "name": "disagreement",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:01.000Z",
+        "modality": "sensor",
+        "label": "WALKING",
+        "confidence": 0.61,
+        "motion_intensity": 0.22
+      },
+      "video": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:01.040Z",
+        "modality": "video",
+        "label": "STANDING",
+        "confidence": 0.78,
+        "orientation": "vertical"
+      }
+    },
+    {
+      "name": "missing_video_modality",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:02.000Z",
+        "modality": "sensor",
+        "label": "SITTING",
+        "confidence": 0.72,
+        "motion_intensity": 0.02
+      },
+      "video": null
+    },
+    {
+      "name": "motion_spike",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:03.000Z",
+        "modality": "sensor",
+        "label": "EXERCISING",
+        "confidence": 0.84,
+        "motion_intensity": 0.96
+      },
+      "video": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:03.080Z",
+        "modality": "video",
+        "label": "STANDING",
+        "confidence": 0.69,
+        "orientation": "vertical"
+      }
+    },
+    {
+      "name": "horizontal_transition",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:04.000Z",
+        "modality": "sensor",
+        "label": "UNKNOWN",
+        "confidence": 0.35,
+        "motion_intensity": 0.93
+      },
+      "video": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:04.060Z",
+        "modality": "video",
+        "label": "LYING",
+        "confidence": 0.9,
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "name": "ordinary_lying",
+      "sensor": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:05.000Z",
+        "modality": "sensor",
+        "label": "LYING",
+        "confidence": 0.76,
+        "motion_intensity": 0.01
+      },
+      "video": {
+        "schema_version": "1.0",
+        "ts": "2026-06-20T10:00:05.020Z",
+        "modality": "video",
+        "label": "LYING",
+        "confidence": 0.91,
+        "orientation": "horizontal"
+      }
+    }
+  ]
+}

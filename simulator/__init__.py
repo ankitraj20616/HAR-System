@@ -1,5 +1,5 @@
-"""Sensor-data simulator package.
+"""Software-only, labelled sensor dataset replay."""
 
-Dataset replay is intentionally introduced after the Milestone 1 foundation;
-this package reserves the stable import and repository location now.
-"""
+from .datasets import DatasetWindow, SisFallLoader, UciHarLoader, WisdmLoader, load_dataset
+
+__all__ = ["DatasetWindow", "SisFallLoader", "UciHarLoader", "WisdmLoader", "load_dataset"]
