@@ -20,6 +20,8 @@ class LabelAndTopicTests(unittest.TestCase):
         self.assertEqual(map_activity_label("downstairs"), ActivityLabel.WALKING)
         self.assertEqual(map_activity_label("laying"), ActivityLabel.LYING)
         self.assertEqual(map_activity_label("running"), ActivityLabel.EXERCISING)
+        self.assertEqual(map_activity_label("stairs"), ActivityLabel.WALKING)
+        self.assertEqual(map_activity_label("biking"), ActivityLabel.EXERCISING)
 
     def test_unknown_input_maps_to_unknown(self):
         self.assertEqual(map_activity_label("invented-label"), ActivityLabel.UNKNOWN)

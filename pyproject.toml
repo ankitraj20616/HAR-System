@@ -3,9 +3,12 @@ name = "har-system"
 version = "0.1.0"
 description = "Foundation and shared contracts for the multi-modal HAR system"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.13"
 dependencies = [
+    "ai-edge-litert==2.1.6",
     "fastapi==0.115.12",
+    "mediapipe==0.10.21",
+    "opencv-contrib-python==4.11.0.86",
     "paho-mqtt==2.1.0",
     "psycopg[binary]==3.2.9",
     "pydantic==2.11.5",
