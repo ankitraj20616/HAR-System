@@ -1,0 +1,51 @@
+[project]
+name = "har-system"
+version = "0.1.0"
+description = "Foundation and shared contracts for the multi-modal HAR system"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi==0.115.12",
+    "paho-mqtt==2.1.0",
+    "psycopg[binary]==3.2.9",
+    "pydantic==2.11.5",
+    "pydantic-settings==2.9.1",
+    "SQLAlchemy==2.0.41",
+    "uvicorn[standard]==0.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==8.3.5",
+    "pytest-cov==6.1.1",
+    "ruff==0.11.11",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --tb=short"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["services", "shared", "simulator"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
