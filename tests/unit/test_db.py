@@ -1,5 +1,5 @@
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 from shared.db import (
     SCHEMA_SQL,
@@ -7,6 +7,12 @@ from shared.db import (
     EventRepository,
     FeedbackRepository,
     acknowledge_event,
+    get_activities_between,
+    get_activity_trends,
+    get_event,
+    get_events_between,
+    get_latest_activity,
+    get_latest_event,
     get_recent_activities,
     get_recent_events,
     get_recent_feedback,
@@ -83,6 +89,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS events", SCHEMA_SQL)
         self.assertIn("CREATE TABLE IF NOT EXISTS feedback", SCHEMA_SQL)
         self.assertIn("CREATE INDEX IF NOT EXISTS idx_feedback_ts", SCHEMA_SQL)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_unique_ts", SCHEMA_SQL)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_unique_type_ts", SCHEMA_SQL)
+        self.assertIn("DELETE FROM activity_timeline newer", SCHEMA_SQL)
         self.assertIn("confidence >= 0 AND confidence <= 1", SCHEMA_SQL)
         self.assertIn("jsonb_typeof(evidence) = 'object'", SCHEMA_SQL)
 
@@ -107,6 +116,7 @@ class DatabaseTests(unittest.TestCase):
         query, params = incomplete.executions[0]
         self.assertIn("to_regclass('activity_timeline')", query)
         self.assertIn("to_regclass('idx_feedback_ts')", query)
+        self.assertIn("to_regclass('idx_timeline_unique_ts')", query)
         self.assertIsNone(params)
 
     def test_insert_activity_uses_parameterized_query_and_commits(self):
@@ -120,6 +130,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(insert_activity(connection, activity), 42)
         query, params = connection.executions[0]
         self.assertIn("RETURNING id", query)
+        self.assertIn("ON CONFLICT (ts) DO UPDATE", query)
         self.assertIn("%s", query)
         self.assertEqual(params[1], "WALKING")
         self.assertEqual(connection.commits, 1)
@@ -137,6 +148,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(insert_event(event_connection, event), 7)
         event_query, event_params = event_connection.executions[0]
         self.assertIn("%s::jsonb", event_query)
+        self.assertIn("ON CONFLICT (type, ts) DO UPDATE", event_query)
         self.assertEqual(event_params[-1], '{"orientation": "horizontal"}')
 
         feedback_connection = FakeConnection(fetchone=(8,))
@@ -204,13 +216,128 @@ class DatabaseTests(unittest.TestCase):
             get_recent_feedback(FakeConnection(), True)
 
     def test_event_acknowledgement_is_idempotent(self):
-        changed = FakeConnection(rowcount=1)
-        unchanged = FakeConnection(rowcount=0)
-        self.assertTrue(acknowledge_event(changed, 10))
-        self.assertFalse(acknowledge_event(unchanged, 10))
-        self.assertEqual(changed.commits, 1)
+        existing = FakeConnection(rowcount=1)
+        repeated = FakeConnection(rowcount=1)
+        unknown = FakeConnection(rowcount=0)
+        self.assertTrue(acknowledge_event(existing, 10))
+        self.assertTrue(acknowledge_event(repeated, 10))
+        self.assertFalse(acknowledge_event(unknown, 999))
+        self.assertNotIn("acknowledged = FALSE", existing.executions[0][0])
+        self.assertEqual(existing.commits, 1)
         with self.assertRaises(ValueError):
-            acknowledge_event(changed, 0)
+            acknowledge_event(existing, 0)
+        with self.assertRaises(TypeError):
+            acknowledge_event(existing, True)
+
+    def test_latest_and_event_lookup_return_named_rows_or_none(self):
+        activity_columns = [
+            "id",
+            "ts",
+            "activity",
+            "confidence",
+            "sensor_label",
+            "video_label",
+        ]
+        activity_row = (1, "2026-06-20T10:00:00Z", "WALKING", 0.9, "WALKING", None)
+        activity_connection = FakeConnection(
+            fetchone=activity_row, description=[(column,) for column in activity_columns]
+        )
+        self.assertEqual(
+            get_latest_activity(activity_connection),
+            dict(zip(activity_columns, activity_row, strict=True)),
+        )
+        self.assertIn("ORDER BY ts DESC, id DESC LIMIT 1", activity_connection.executions[0][0])
+
+        event_columns = [
+            "id",
+            "ts",
+            "type",
+            "severity",
+            "confidence",
+            "evidence",
+            "acknowledged",
+        ]
+        event_row = (7, "2026-06-20T10:01:00Z", "FALL", "critical", 0.9, {}, False)
+        event_connection = FakeConnection(
+            fetchone=event_row, description=[(column,) for column in event_columns]
+        )
+        self.assertEqual(
+            get_latest_event(event_connection),
+            dict(zip(event_columns, event_row, strict=True)),
+        )
+        lookup_connection = FakeConnection(
+            fetchone=event_row, description=[(column,) for column in event_columns]
+        )
+        self.assertEqual(get_event(lookup_connection, 7)["id"], 7)
+        self.assertEqual(lookup_connection.executions[0][1], (7,))
+
+        self.assertIsNone(get_event(FakeConnection(fetchone=None), 8))
+        with self.assertRaises(ValueError):
+            get_event(FakeConnection(), -1)
+
+    def test_range_queries_validate_utc_and_return_chronological_rows(self):
+        start = datetime(2026, 6, 20, 10, tzinfo=UTC)
+        end = start + timedelta(hours=1)
+        cases = (
+            (
+                get_activities_between,
+                ["id", "ts", "activity", "confidence", "sensor_label", "video_label"],
+                (1, start, "WALKING", 0.9, "WALKING", None),
+            ),
+            (
+                get_events_between,
+                ["id", "ts", "type", "severity", "confidence", "evidence", "acknowledged"],
+                (2, start, "FALL", "critical", 0.9, {}, False),
+            ),
+        )
+        for reader, columns, row in cases:
+            connection = FakeConnection(
+                fetchall=[row], description=[(column,) for column in columns]
+            )
+            self.assertEqual(
+                reader(connection, start, end, 25),
+                [dict(zip(columns, row, strict=True))],
+            )
+            query, params = connection.executions[0]
+            self.assertIn("WHERE ts >= %s AND ts <= %s", query)
+            self.assertIn("ORDER BY ts ASC, id ASC LIMIT %s", query)
+            self.assertEqual(params, (start, end, 25))
+
+        with self.assertRaises(ValueError):
+            get_activities_between(FakeConnection(), end, start)
+        with self.assertRaises(ValueError):
+            get_events_between(FakeConnection(), start.replace(tzinfo=None), end)
+        with self.assertRaises(ValueError):
+            get_events_between(
+                FakeConnection(),
+                start.astimezone(timezone(timedelta(hours=5, minutes=30))),
+                end,
+            )
+        with self.assertRaises(ValueError):
+            get_activities_between(FakeConnection(), start, end, 1001)
+
+    def test_trends_query_caps_gaps_and_validates_duration(self):
+        start = datetime(2026, 6, 20, 10, tzinfo=UTC)
+        end = start + timedelta(hours=1)
+        columns = ["activity", "count", "duration_seconds"]
+        row = ("WALKING", 2, 2.0)
+        connection = FakeConnection(fetchall=[row], description=[(column,) for column in columns])
+
+        self.assertEqual(
+            get_activity_trends(connection, start, end, 3.5),
+            [dict(zip(columns, row, strict=True))],
+        )
+        query, params = connection.executions[0]
+        self.assertIn("LEAD(ts)", query)
+        self.assertIn("LEAST(", query)
+        self.assertIn("GREATEST(EXTRACT(EPOCH", query)
+        self.assertEqual(params, (start, end, end, 3.5, end))
+
+        for invalid in (0, -1, 86_401):
+            with self.assertRaises(ValueError):
+                get_activity_trends(FakeConnection(), start, end, invalid)
+        with self.assertRaises(TypeError):
+            get_activity_trends(FakeConnection(), start, end, True)
 
     def test_repositories_use_injected_connections_and_close_them(self):
         activity_connection = FakeConnection(fetchone=(1,))

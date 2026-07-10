@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS feedback (
   CONSTRAINT feedback_payload_object_check CHECK (jsonb_typeof(payload) = 'object')
 );
 
+-- These keys make persistence retries safe after an uncertain commit or a
+-- service restart. The fusion service emits at most one authoritative record
+-- for an interval timestamp and one event type at an event timestamp. Clean up
+-- pre-Milestone-3 retry duplicates before installing the repeatable indexes so
+-- this migration also works against an existing development volume.
+DELETE FROM activity_timeline newer
+USING activity_timeline older
+WHERE newer.ts = older.ts AND newer.id > older.id;
+
+DELETE FROM events newer
+USING events older
+WHERE newer.type = older.type AND newer.ts = older.ts AND newer.id > older.id;
+
 CREATE INDEX IF NOT EXISTS idx_timeline_ts ON activity_timeline(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback(ts DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_unique_ts ON activity_timeline(ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_unique_type_ts ON events(type, ts);

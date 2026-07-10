@@ -1,9 +1,9 @@
 # HAR System
 
-A software-only, privacy-first Human Activity Recognition system for patient monitoring. Milestone 2
-adds independent real-time sensor and webcam recognition: public IMU dataset replay, fixed-window
-sensor features with pinned local model/fallback inference, and MediaPipe pose geometry that never
-stores or transmits raw frames. Fusion, GenAI, and the finished dashboard remain later milestones.
+A software-only, privacy-first Human Activity Recognition system for patient monitoring. Milestone 3
+adds confidence-weighted, time-aligned fusion, temporal smoothing, two-signal fall safety logic,
+inactivity/abnormal-pattern safeguards, PostgreSQL timeline/event history, and live REST/WebSocket
+interfaces. Raw camera frames are never stored or transmitted.
 
 ## Start everything with one command
 
@@ -84,7 +84,7 @@ USE_FALLBACK=true
 | Component | Local address | Purpose |
 |---|---|---|
 | Dashboard | <http://localhost:5173> | Milestone 1 readiness page |
-| Fusion service | <http://localhost:8001/health> | Fusion API skeleton and database/MQTT health |
+| Fusion service | <http://localhost:8001/health> | Fused activity, safety events, history, and database/MQTT health |
 | Feedback service | <http://localhost:8002/health> | Feedback API skeleton and database/MQTT health |
 | Sensor service | <http://localhost:8003/health> | Window/features/model-fallback inference and MQTT health |
 | Video service | <http://localhost:8004/health> | Webcam/pose/activity rules and MQTT/camera health |
@@ -126,13 +126,24 @@ CI runs the same formatting, lint, and test checks and also validates and builds
 The Milestone 2 suite covers dataset parsing/replay, feature formulas, window overlap, local-model
 adapters, MQTT contracts, synthetic postures/motion, camera lifecycle, and a privacy audit.
 
+## Fusion API
+
+The Fusion service exposes `GET /api/status`, `GET /api/timeline?from=&to=`,
+`GET /api/trends?period=`, `GET /api/events?from=&to=`, and idempotent
+`POST /api/events/{id}/ack`. The `/ws` endpoint sends typed `{channel, data}` activity and event
+envelopes. Timeline/event writes are database-authoritative; MQTT and WebSocket delivery is
+best-effort and retried for transient database failures. A fall requires both a sensor motion spike
+and horizontal video evidence inside the configured correlation window; a single modality cannot
+raise a critical fall.
+
 ## Configuration
 
 All configuration is environment-driven. [.env.example](.env.example) documents safe development
 defaults for service ports, logging, schema version, sensor windows/model preprocessing, video
-thresholds and reconnect backoff, fusion thresholds, and feedback-provider selection. Secrets must be
-supplied only through an untracked `.env` or another secret manager. The default feedback provider is
-a deterministic offline template and needs no API key.
+thresholds and reconnect backoff, fusion weights/alignment/smoothing/safety thresholds, and
+feedback-provider selection. Secrets must be supplied only through an untracked `.env` or another
+secret manager. The default feedback provider is a deterministic offline template and needs no API
+key.
 
 ## Repository map
 
@@ -146,7 +157,9 @@ tests/          Unit, contract, and integration tests
 core_docs/      Functional and technical specifications plus milestone plans
 ```
 
-See [Milestone 2 FSD](core_docs/milestones/milestone-2-single-modality/FSD.md),
+See [Milestone 3 FSD](core_docs/milestones/milestone-3-fusion-safety/FSD.md),
+[Milestone 3 TDD](core_docs/milestones/milestone-3-fusion-safety/TDD.md),
+[Milestone 2 FSD](core_docs/milestones/milestone-2-single-modality/FSD.md),
 [Milestone 2 TDD](core_docs/milestones/milestone-2-single-modality/TDD.md), and
 [Milestone 2 implementation notes](core_docs/milestones/milestone-2-single-modality/IMPLEMENTATION.md)
 for scope and acceptance criteria. Fusion-ready fixtures are in
