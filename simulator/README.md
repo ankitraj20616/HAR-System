@@ -6,6 +6,14 @@ topic `har/sensor/raw`.
 
 This lets the full HAR pipeline run without buying or wiring physical sensor hardware.
 
+## Two simulator modes
+
+- `python -m simulator.demo` is the deterministic, dataset-free synthetic publisher used by the
+  one-command Docker demo. Compose starts it automatically. It cycles quiet, walking-like, and
+  vigorous motion and does **not** provide evaluation evidence.
+- `python -m simulator.replay` reads an approved public dataset and can keep ground truth in a
+  separate JSONL file. Use this mode for fixed evaluation captures and final metrics.
+
 ## What the simulator does
 
 For each dataset window, the simulator:
@@ -34,19 +42,20 @@ Dataset files are not included in Git. Put downloaded/extracted files under `dat
 Mosquitto must be reachable. The Sensor Service should also be running if you want raw data to become
 predictions, and the Fusion Service should be running if you want final activity/history.
 
-The easiest option is to start the full project:
+The easiest option is to start the full project. This command already includes the built-in
+synthetic simulator:
 
 ```bash
 docker compose up --build --wait
 ```
 
-For local Python usage, activate the project environment:
+For local Python usage, install the exact locked environment:
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+uv sync --frozen
 ```
+
+The examples below use `uv run python` so they execute inside that environment.
 
 ## Basic UCI HAR replay
 
@@ -69,7 +78,7 @@ data/
 Run the dataset at its normal recorded timing:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --realtime \
@@ -92,7 +101,7 @@ user,label,timestamp,x,y,z
 Example:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset wisdm \
   --dataset-path data/WISDM/WISDM_ar_v1.1_raw.txt \
   --realtime \
@@ -123,7 +132,7 @@ data/
 Replay every scenario:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset sisfall \
   --dataset-path data/SisFall_dataset \
   --realtime \
@@ -133,7 +142,7 @@ python -m simulator.replay \
 Replay only fall scenarios:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset sisfall \
   --dataset-path data/SisFall_dataset \
   --scenario 'F*' \
@@ -149,7 +158,7 @@ event must still be detected downstream from sensor motion plus horizontal video
 Show the built-in help:
 
 ```bash
-python -m simulator.replay --help
+uv run python -m simulator.replay --help
 ```
 
 | Option | Default | Meaning |
@@ -174,7 +183,7 @@ Quote wildcard patterns so the shell does not expand them before the simulator s
 ### Replay ten times faster
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --speed 10
@@ -183,7 +192,7 @@ python -m simulator.replay \
 ### Publish as fast as possible
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --no-realtime
@@ -192,7 +201,7 @@ python -m simulator.replay \
 ### Repeat until interrupted
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset wisdm \
   --dataset-path data/WISDM/raw.txt \
   --loop
@@ -203,7 +212,7 @@ Press `Ctrl+C` for a graceful stop.
 ### Use a different broker
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --mqtt-host 192.168.1.20 \
@@ -218,7 +227,7 @@ Do not send unencrypted anonymous MQTT traffic over an untrusted network.
 Write evaluation labels separately:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --ground-truth-file data/metrics/ground-truth.jsonl

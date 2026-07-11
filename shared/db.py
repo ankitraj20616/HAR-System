@@ -319,21 +319,25 @@ def get_latest_unacknowledged_critical_event(connection: Connection) -> dict[str
 def get_latest_feedback(connection: Connection, mode: str | None = None) -> dict[str, Any] | None:
     """Return newest feedback, optionally restricted to a validated mode."""
 
+    params: tuple[Any, ...] = ()
+    where_clause = ""
     if mode is not None:
         if not isinstance(mode, str):
             raise TypeError("mode must be a string")
         mode = mode.strip().lower()
         if mode not in {"alert", "feedback", "summary"}:
             raise ValueError("mode must be alert, feedback, or summary")
+        where_clause = "WHERE mode = %s"
+        params = (mode,)
     return _fetch_one_dict(
         connection,
-        """
+        f"""
         SELECT id, ts, mode, headline, detail, severity, payload, idempotency_key
         FROM feedback
-        WHERE (%s IS NULL OR mode = %s)
+        {where_clause}
         ORDER BY ts DESC, id DESC LIMIT 1
         """,
-        (mode, mode),
+        params,
     )
 
 

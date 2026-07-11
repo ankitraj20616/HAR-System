@@ -93,7 +93,13 @@ def test_feedback_readers_support_latest_mode_key_and_utc_range() -> None:
 
     latest = Connection(fetchone=row, columns=columns)
     assert get_latest_feedback(latest, "alert")["id"] == 1
-    assert latest.executions[0][1] == ("alert", "alert")
+    assert latest.executions[0][1] == ("alert",)
+
+    latest_any = Connection(fetchone=row, columns=columns)
+    assert get_latest_feedback(latest_any)["id"] == 1
+    query, params = latest_any.executions[0]
+    assert "WHERE mode" not in query
+    assert params == ()
 
     by_key = Connection(fetchone=row, columns=columns)
     assert get_feedback_by_idempotency_key(by_key, " event:1 ")["id"] == 1

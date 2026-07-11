@@ -94,6 +94,22 @@ services:
       <<: *api-healthcheck
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8003/health',timeout=2)); assert data['status'] in ('healthy','degraded')"]
 
+  simulator:
+    <<: *backend
+    command: ["python", "-m", "simulator.demo"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: simulator
+      SIMULATOR_DEVICE_ID: ${SIMULATOR_DEVICE_ID:-demo-sim-01}
+      SIMULATOR_SAMPLING_HZ: ${SIMULATOR_SAMPLING_HZ:-50}
+      SIMULATOR_CHUNK_SECONDS: ${SIMULATOR_CHUNK_SECONDS:-0.5}
+      SIMULATOR_SCENARIO_SECONDS: ${SIMULATOR_SCENARIO_SECONDS:-12}
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      sensor-service:
+        condition: service_healthy
+
   video-service:
     <<: *backend
     command: ["uvicorn", "services.video_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
@@ -201,6 +217,8 @@ services:
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-5173}:80"
     depends_on:
+      simulator:
+        condition: service_started
       sensor-service:
         condition: service_healthy
       video-service:

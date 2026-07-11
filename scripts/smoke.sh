@@ -24,7 +24,7 @@ trap cleanup EXIT
 echo "Validating Compose configuration..."
 "${compose[@]}" config --quiet
 
-echo "Building and starting the Milestone 4 stack..."
+echo "Building and starting the Milestone 5 demo stack (including simulator)..."
 up_args=(up --detach --wait --wait-timeout "${SMOKE_TIMEOUT_SECONDS:-180}")
 if [[ "${SMOKE_SKIP_BUILD:-false}" == "true" ]]; then
   up_args+=(--no-build)
@@ -42,6 +42,30 @@ for port in \
   curl --fail --silent --show-error "http://localhost:${port}/health" >/dev/null
 done
 curl --fail --silent --show-error "http://localhost:${DASHBOARD_PORT:-5173}/health" >/dev/null
+
+echo "Waiting for the built-in simulator to reach Fusion..."
+python_bin="${PYTHON:-python3}"
+if ! command -v "$python_bin" >/dev/null 2>&1; then
+  echo "Python 3 is required for the Fusion status check (set PYTHON to its path)." >&2
+  exit 1
+fi
+FUSION_SERVICE_PORT="${FUSION_SERVICE_PORT:-8001}" "$python_bin" - <<'PY'
+import json
+import os
+import time
+import urllib.request
+
+deadline = time.monotonic() + 20
+url = f"http://localhost:{os.environ['FUSION_SERVICE_PORT']}/api/status"
+while time.monotonic() < deadline:
+    with urllib.request.urlopen(url, timeout=2) as response:
+        status = json.load(response)
+    if status["modality_health"]["sensor"]["status"] == "online":
+        break
+    time.sleep(0.5)
+else:
+    raise SystemExit("simulator did not produce a live sensor prediction within 20 seconds")
+PY
 
 echo "Checking MQTT publish/subscribe..."
 "${compose[@]}" exec -T mosquitto sh -eu -c '
@@ -96,4 +120,4 @@ curl --fail --silent --show-error \
 curl --fail --silent --show-error \
   "http://localhost:${DASHBOARD_PORT:-5173}/api/feedback/latest" >/dev/null
 
-echo "Milestone 4 stack smoke test passed."
+echo "Milestone 5 demo stack smoke test passed."
