@@ -3,25 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HAR System — Foundation</title>
-    <style>
-      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0f172a; color: #e2e8f0; }
-      main { max-width: 42rem; margin: 2rem; padding: 2.5rem; border: 1px solid #334155; border-radius: 1rem; background: #1e293b; }
-      h1 { margin-top: 0; }
-      .status { display: inline-flex; gap: .5rem; align-items: center; color: #86efac; }
-      .dot { width: .75rem; height: .75rem; border-radius: 50%; background: #22c55e; }
-      code { color: #93c5fd; }
-    </style>
+    <meta name="theme-color" content="#0b1220" />
+    <meta name="description" content="Live human activity monitoring for caregivers" />
+    <title>HAR Caregiver Dashboard</title>
   </head>
   <body>
-    <main>
-      <p class="status"><span class="dot"></span> Dashboard container is healthy</p>
-      <h1>HAR System foundation</h1>
-      <p>
-        The Milestone 1 runtime is ready. The complete caregiver dashboard is intentionally scheduled
-        for Milestone 4; backend health APIs are available on ports <code>8001–8004</code>.
-      </p>
-    </main>
+    <a class="skip-link" href="#main-content">Skip to dashboard</a>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

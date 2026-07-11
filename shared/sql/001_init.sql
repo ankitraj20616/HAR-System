@@ -36,10 +36,14 @@ CREATE TABLE IF NOT EXISTS feedback (
   detail       TEXT NOT NULL,
   severity     VARCHAR(10) NOT NULL,
   payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  idempotency_key VARCHAR(255),
   CONSTRAINT feedback_mode_check CHECK (mode IN ('alert', 'feedback', 'summary')),
   CONSTRAINT feedback_severity_check CHECK (severity IN ('info', 'warning', 'critical')),
   CONSTRAINT feedback_payload_object_check CHECK (jsonb_typeof(payload) = 'object')
 );
+
+-- Repeatable upgrade for databases created before Milestone 4.
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
 
 -- These keys make persistence retries safe after an uncertain commit or a
 -- service restart. The fusion service emits at most one authoritative record
@@ -57,5 +61,7 @@ WHERE newer.type = older.type AND newer.ts = older.ts AND newer.id > older.id;
 CREATE INDEX IF NOT EXISTS idx_timeline_ts ON activity_timeline(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback(ts DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_idempotency_key
+  ON feedback(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_unique_ts ON activity_timeline(ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_unique_type_ts ON events(type, ts);

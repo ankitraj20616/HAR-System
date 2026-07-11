@@ -36,6 +36,22 @@ def _record(model: type[Any], value: dict[str, Any]) -> Any:
     return model.model_validate(value)
 
 
+def _timeline_records(
+    rows: list[dict[str, Any]], end: datetime, max_interval_seconds: float
+) -> list[ActivityRecord]:
+    """Attach bounded durations without treating offline gaps as activity."""
+
+    records: list[ActivityRecord] = []
+    for index, row in enumerate(rows):
+        next_ts = rows[index + 1]["ts"] if index + 1 < len(rows) else end
+        duration = max(
+            0.0,
+            min((next_ts - row["ts"]).total_seconds(), max_interval_seconds),
+        )
+        records.append(ActivityRecord.model_validate({**row, "duration_seconds": duration}))
+    return records
+
+
 def create_router(runtime: FusionMQTTDependency) -> APIRouter:
     router = APIRouter()
 
@@ -56,7 +72,11 @@ def create_router(runtime: FusionMQTTDependency) -> APIRouter:
         except Exception as exc:
             raise HTTPException(status_code=503, detail="timeline persistence unavailable") from exc
         return TimelineResponse(
-            items=[_record(ActivityRecord, row) for row in rows],
+            items=_timeline_records(
+                rows,
+                end,
+                max(runtime.settings.fusion_interval, 0.1) * 2,
+            ),
             count=len(rows),
         )
 
@@ -76,6 +96,14 @@ def create_router(runtime: FusionMQTTDependency) -> APIRouter:
             items=[_record(EventRecord, row) for row in rows],
             count=len(rows),
         )
+
+    @router.get("/api/events/active-critical", response_model=EventRecord | None)
+    async def active_critical_event() -> EventRecord | None:
+        try:
+            row = await run_blocking(runtime.event_repository.latest_unacknowledged_critical)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="event persistence unavailable") from exc
+        return _record(EventRecord, row) if row else None
 
     @router.get("/api/trends", response_model=TrendsResponse)
     async def trends(

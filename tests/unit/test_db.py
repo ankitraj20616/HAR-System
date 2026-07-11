@@ -300,7 +300,8 @@ class DatabaseTests(unittest.TestCase):
             )
             query, params = connection.executions[0]
             self.assertIn("WHERE ts >= %s AND ts <= %s", query)
-            self.assertIn("ORDER BY ts ASC, id ASC LIMIT %s", query)
+            self.assertIn("ORDER BY ts DESC, id DESC LIMIT %s", query)
+            self.assertIn("ORDER BY ts ASC, id ASC", query)
             self.assertEqual(params, (start, end, 25))
 
         with self.assertRaises(ValueError):

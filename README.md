@@ -14,7 +14,7 @@ does not make a diagnosis, and it must not replace a caregiver or emergency serv
 
 ## What is available now
 
-Milestones 1, 2, and 3 are implemented.
+Milestones 1 through 4 are implemented.
 
 | Area | Current state |
 |---|---|
@@ -25,11 +25,11 @@ Milestones 1, 2, and 3 are implemented.
 | Time alignment, confidence-weighted fusion, temporal smoothing | Implemented |
 | Fall, inactivity, and explainable abnormal-pattern detection | Implemented |
 | Activity/event persistence, REST API, and WebSocket updates | Implemented |
-| Finished caregiver dashboard and GenAI feedback | Planned for Milestone 4 |
+| Caregiver dashboard, live alerts, history, trends, and health | Implemented |
+| Structured Ollama feedback, summaries, safety validation, and fallback | Implemented |
 | Final metrics, offline release checks, and project report results | Planned for Milestone 5 |
 
-The page on port `5173` is still a readiness placeholder. The completed dashboard comes in
-Milestone 4.
+Open the caregiver dashboard at <http://localhost:5173> after starting the stack.
 
 ## How the system works
 
@@ -153,9 +153,9 @@ provide the same Linux camera-device passthrough.
 
 | Component | Address | What it does |
 |---|---|---|
-| Dashboard placeholder | <http://localhost:5173> | Shows basic project readiness until Milestone 4 |
+| Caregiver dashboard | <http://localhost:5173> | Live state, alerts, history, trends, health, and feedback |
 | Fusion API | <http://localhost:8001> | Current activity, history, trends, events, acknowledgement, WebSocket |
-| Feedback API | <http://localhost:8002> | Milestone 4 feedback-service foundation |
+| Feedback API | <http://localhost:8002> | Structured feedback/summary generation and Feedback WebSocket |
 | Sensor API | <http://localhost:8003> | Sensor recognition and MQTT health |
 | Video API | <http://localhost:8004> | Webcam/pose recognition and health |
 | Mosquitto | `localhost:1883` | MQTT message broker |
@@ -249,6 +249,33 @@ Messages use a small typed envelope:
 Each browser gets a bounded queue. A very slow or dead browser is disconnected so it cannot block
 safety processing for other consumers.
 
+## Generate safe feedback and summaries
+
+The default provider is local Ollama. Pull the configured model once, start Ollama on the host, and
+then start the stack:
+
+```bash
+ollama pull llama3.2:3b
+ollama serve
+docker compose up --build --wait
+```
+
+Request feedback through the dashboard or directly through its same-origin route:
+
+```bash
+curl -X POST http://localhost:5173/api/feedback/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"feedback","period":"24h","request_id":"demo-feedback-1"}'
+```
+
+Use `mode=summary` for a period recap. Supported periods are `1h`, `24h`, `7d`, and `30d`; explicit
+UTC `from`/`to` values are also accepted. Reusing a `request_id` returns the persisted result instead
+of generating a duplicate. Every output is schema-validated, checked for unsafe/unsupported claims,
+and includes a medical-safety disclaimer. If Ollama is unavailable or its response remains invalid
+after one repair attempt, the service returns deterministic fallback text when fallback is enabled.
+Daily summaries run at the UTC time configured by `SUMMARY_SCHEDULE` using the daily cron form
+`minute hour * * *`.
+
 ## MQTT topics
 
 | Topic | Publisher | Consumer | Purpose |
@@ -330,6 +357,7 @@ Important groups are listed below. Every available setting and its safe default 
 | Fall safety | `FALL_ACCEL_THRESHOLD`, `FALL_CORRELATION_MS`, cooldown/recovery settings |
 | Other safety | `INACTIVITY_SECONDS`, `INACTIVITY_MOTION_THRESHOLD`, abnormal baseline settings |
 | Reliability | buffer sizes, stale timeout, input/WebSocket queue sizes, API limit |
+| Feedback | `LLM_MODEL`, `OLLAMA_HOST`, `GENERATION_TIMEOUT`, digest/period/fallback limits |
 
 Do not commit passwords, API keys, or a personal `.env` file. Local ports bind to `127.0.0.1` by
 default. Configure MQTT authentication and TLS before exposing the broker beyond a trusted laptop.
@@ -376,6 +404,17 @@ ruff format --check .
 ruff check .
 ```
 
+Run the dashboard tests, type check, and production build:
+
+```bash
+cd dashboard
+npm ci
+npm test
+npm run lint
+npm run build
+cd ..
+```
+
 Run the Docker smoke test:
 
 ```bash
@@ -393,7 +432,13 @@ pytest tests/unit/test_fusion_core.py
 pytest tests/unit/test_fusion_safety.py
 pytest tests/unit/test_fusion_runtime.py
 pytest tests/integration/test_fusion_api.py
+pytest tests/unit/test_feedback_generation_m4.py
+pytest tests/integration/test_feedback_api_m4.py
 ```
+
+The Milestone 4 verification baseline is **155 passing Python tests with 1 environment-dependent
+skip**, plus **5 passing dashboard tests**, a clean TypeScript check, and a successful production
+dashboard build.
 
 ## Common problems
 
@@ -425,6 +470,13 @@ docker compose logs mosquitto postgres fusion-service
 This can be correct. A fall requires both a sensor motion spike and horizontal video evidence within
 `FALL_CORRELATION_MS`. Check Fusion logs and tune thresholds only with known test scenarios.
 
+### Feedback uses the safe fallback
+
+- confirm Ollama is running on the host and `OLLAMA_HOST` is reachable from the Feedback container;
+- confirm the configured `LLM_MODEL` has been pulled;
+- check `docker compose logs feedback-service` for provider, validation, or persistence failures;
+- keep `FEEDBACK_FALLBACK_ENABLED=true` so provider failures never remove caregiver-facing guidance.
+
 ### Old history is missing
 
 `docker compose down` keeps history. `docker compose down --volumes` deletes it. Timeline and event
@@ -443,14 +495,14 @@ POSTGRES_PORT=55432
 
 ```text
 core_docs/             Approved functional/technical design and milestone documents
-dashboard/             Nginx-served readiness page; full UI arrives in Milestone 4
+dashboard/             React caregiver UI, tests, production build, and Nginx API/WS proxy
 data/                  Local datasets/models; downloaded content is ignored by Git
 mosquitto/             Local broker configuration
 services/
   sensor_service/      Sensor windows, features, model adapter, fallback, MQTT
   video_service/       Camera, landmarks, posture rules, MQTT
   fusion_service/      Alignment, fusion, safety, persistence, REST, WebSocket
-  feedback_service/    Feedback-service foundation for Milestone 4
+  feedback_service/    Ollama adapter, digests, safety checks, fallback, REST/MQTT/WebSocket
 shared/                Labels, schemas, topics, logging, database helpers and SQL
 simulator/             UCI HAR, WISDM and SisFall loaders plus replay engine
 tests/                 Unit, contract and integration tests
@@ -464,6 +516,9 @@ tests/                 Unit, contract and integration tests
 - [Milestone 3 functional scope](core_docs/milestones/milestone-3-fusion-safety/FSD.md)
 - [Milestone 3 technical design](core_docs/milestones/milestone-3-fusion-safety/TDD.md)
 - [Milestone 3 implementation notes](core_docs/milestones/milestone-3-fusion-safety/IMPLEMENTATION.md)
+- [Milestone 4 functional scope](core_docs/milestones/milestone-4-dashboard-feedback/FSD.md)
+- [Milestone 4 technical design](core_docs/milestones/milestone-4-dashboard-feedback/TDD.md)
+- [Milestone 4 implementation notes](core_docs/milestones/milestone-4-dashboard-feedback/IMPLEMENTATION.md)
 - [Branching strategy](core_docs/BRANCHING_STRATEGY.md)
 
 ## Privacy and project limitations
