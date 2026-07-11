@@ -14,7 +14,8 @@ does not make a diagnosis, and it must not replace a caregiver or emergency serv
 
 ## What is available now
 
-Milestones 1 through 4 are implemented.
+Milestones 1 through 5 are implemented. Final target-laptop results remain `NOT RUN` until the
+release runbook is executed and its evidence is reviewed.
 
 | Area | Current state |
 |---|---|
@@ -27,7 +28,9 @@ Milestones 1 through 4 are implemented.
 | Activity/event persistence, REST API, and WebSocket updates | Implemented |
 | Caregiver dashboard, live alerts, history, trends, and health | Implemented |
 | Structured Ollama feedback, summaries, safety validation, and fallback | Implemented |
-| Final metrics, offline release checks, and project report results | Planned for Milestone 5 |
+| Fixed-scenario metrics harness and machine/human-readable reports | Implemented |
+| Release audit, dependency pin validation, and CI release gates | Implemented |
+| Demo/operations runbook and privacy/offline/usability evidence package | Implemented; target-laptop evidence pending |
 
 Open the caregiver dashboard at <http://localhost:5173> after starting the stack.
 
@@ -94,7 +97,10 @@ Start the complete stack from the repository root:
 docker compose up --build --wait
 ```
 
-No `.env` file is required. The repository includes safe local defaults.
+This starts Mosquitto, PostgreSQL, all four backend services, the dashboard, and a deterministic
+offline synthetic sensor simulator. No `.env` file or dataset download is required for this demo
+path; the repository includes safe local defaults. The synthetic cycle is not final evaluation
+evidence.
 
 Check that every container started:
 
@@ -297,7 +303,7 @@ The simulator supports UCI HAR, WISDM, and SisFall. First start Mosquitto and th
 start the full Compose stack. Then activate the local Python environment and run:
 
 ```bash
-python -m simulator.replay \
+uv run python -m simulator.replay \
   --dataset uci-har \
   --dataset-path "data/UCI HAR Dataset" \
   --realtime \
@@ -422,8 +428,34 @@ Run the Docker smoke test:
 ```
 
 The smoke test validates Compose, starts the stack, checks HTTP health, performs an MQTT round trip,
-and verifies PostgreSQL tables and temporary persistence. It keeps named volumes unless
+verifies that the built-in simulator reaches Fusion, and verifies PostgreSQL tables and temporary
+persistence. It keeps named volumes unless
 `SMOKE_REMOVE_VOLUMES=true` is set.
+
+Validate release dependency/configuration pins and generate the repository audit:
+
+```bash
+uv run python scripts/validate_deployment.py
+uv run python scripts/release_audit.py --output-dir artifacts/release
+```
+
+The audit writes JSON and Markdown evidence for dependency inventory, secret patterns, and raw-media
+artifacts. Repeat it with `--runtime-path <path>` for sanitized runtime exports and optionally
+`--database-url "$DATABASE_URL"` for a prepared local database. A passing automated scan covers only
+the inspected paths; complete the target-laptop privacy, offline, recovery, and usability checks in
+the [Milestone 5 runbook](core_docs/milestones/milestone-5-verification-release/RUNBOOK.md).
+
+Evaluate a fixed captured scenario and write JSON, CSV, and Markdown results (including confusion
+matrices):
+
+```bash
+uv run python -m tests.metrics artifacts/captures/final-scenario.json \
+  --output-dir artifacts/metrics/final
+```
+
+The bundled release-demo scenario is a synthetic test fixture for the harness, not measured release
+evidence. Final claims require the exact target-laptop commit, configuration, dataset/model identity,
+scenario selection, and timestamp recorded in the evidence package.
 
 Useful focused tests:
 
@@ -436,9 +468,8 @@ pytest tests/unit/test_feedback_generation_m4.py
 pytest tests/integration/test_feedback_api_m4.py
 ```
 
-The Milestone 4 verification baseline is **155 passing Python tests with 1 environment-dependent
-skip**, plus **5 passing dashboard tests**, a clean TypeScript check, and a successful production
-dashboard build.
+Do not copy test counts from an earlier run into release evidence. Record the counts, skips, commit,
+UTC time, and artifacts produced by the exact candidate run.
 
 ## Common problems
 
@@ -519,6 +550,11 @@ tests/                 Unit, contract and integration tests
 - [Milestone 4 functional scope](core_docs/milestones/milestone-4-dashboard-feedback/FSD.md)
 - [Milestone 4 technical design](core_docs/milestones/milestone-4-dashboard-feedback/TDD.md)
 - [Milestone 4 implementation notes](core_docs/milestones/milestone-4-dashboard-feedback/IMPLEMENTATION.md)
+- [Milestone 5 functional scope](core_docs/milestones/milestone-5-verification-release/FSD.md)
+- [Milestone 5 technical design](core_docs/milestones/milestone-5-verification-release/TDD.md)
+- [Milestone 5 implementation notes](core_docs/milestones/milestone-5-verification-release/IMPLEMENTATION.md)
+- [Milestone 5 demo and operations runbook](core_docs/milestones/milestone-5-verification-release/RUNBOOK.md)
+- [Milestone 5 evidence package](core_docs/milestones/milestone-5-verification-release/evidence/README.md)
 - [Branching strategy](core_docs/BRANCHING_STRATEGY.md)
 
 ## Privacy and project limitations

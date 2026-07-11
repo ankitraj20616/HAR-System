@@ -18,8 +18,8 @@ The project is intentionally software-only:
 | 1. Foundation and contracts | Implemented | Runnable services, MQTT, PostgreSQL, shared schemas, configuration, health checks |
 | 2. Single-modality recognition | Implemented | Dataset replay, sensor activity recognition, webcam pose recognition |
 | 3. Fusion, safety, and persistence | Implemented | One activity stream, fall/inactivity events, saved history, REST and WebSocket APIs |
-| 4. Dashboard and feedback | Planned | Finished caregiver dashboard, alert UI, GenAI feedback, summaries |
-| 5. Verification and release | Planned | Metrics, resilience checks, offline demo, final documentation and release |
+| 4. Dashboard and feedback | Implemented | Caregiver dashboard, alert UI, safe GenAI feedback, summaries |
+| 5. Verification and release | Implemented; release evidence pending | Metrics, hardened one-command demo, release audits, runbooks and evidence templates |
 
 “Implemented” means the code and automated tests exist in the development history. A milestone is
 fully accepted only after its exit checklist also passes in the intended demo environment.
@@ -150,7 +150,7 @@ Folder: [`milestone-4-dashboard-feedback`](milestone-4-dashboard-feedback/)
 
 Give caregivers and doctors a simple user interface and understandable feedback.
 
-### Planned work
+### Implemented work
 
 - live current-activity card;
 - modality/service health panel;
@@ -172,6 +172,9 @@ Give caregivers and doctors a simple user interface and understandable feedback.
 A non-technical user can understand the current activity, see a fall clearly, review history, and read
 plain-language feedback that never claims to diagnose a medical condition.
 
+Implementation details are recorded in
+[`milestone-4-dashboard-feedback/IMPLEMENTATION.md`](milestone-4-dashboard-feedback/IMPLEMENTATION.md).
+
 ## Milestone 5: Verification and release
 
 Folder: [`milestone-5-verification-release`](milestone-5-verification-release/)
@@ -180,7 +183,7 @@ Folder: [`milestone-5-verification-release`](milestone-5-verification-release/)
 
 Prove that the complete system is reliable enough for the college demonstration and final report.
 
-### Planned work
+### Implemented work
 
 - labeled dataset replay through the full pipeline;
 - per-class F1 scores;
@@ -191,7 +194,7 @@ Prove that the complete system is reliable enough for the college demonstration 
 - offline demonstration checks;
 - privacy and dependency audit;
 - final setup, troubleshooting, and report documentation;
-- release tags.
+- release-gate and evidence templates (tags remain blocked until target-laptop evidence passes).
 
 ### Main requirements
 
@@ -202,6 +205,12 @@ Prove that the complete system is reliable enough for the college demonstration 
 One documented command starts the demo, expected safety and resilience scenarios pass, metrics are
 available for the final report, and another person can follow the documentation without help from the
 original developers.
+
+The code, automated gates, Docker images, and disposable-stack smoke test are implemented. Final
+webcam, offline-network, usability, and measured-dataset results must still be captured on the
+target laptop; the repository intentionally records them as `NOT RUN` rather than inventing results.
+See [`milestone-5-verification-release/IMPLEMENTATION.md`](milestone-5-verification-release/IMPLEMENTATION.md)
+and [`milestone-5-verification-release/RUNBOOK.md`](milestone-5-verification-release/RUNBOOK.md).
 
 ## Requirement code guide
 
