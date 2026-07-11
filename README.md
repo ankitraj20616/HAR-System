@@ -34,6 +34,13 @@ release runbook is executed and its evidence is reviewed.
 
 Open the caregiver dashboard at <http://localhost:5173> after starting the stack.
 
+For a one-command seeded prototype, service controls, environment-value guidance, and the complete
+local walkthrough, see [LOCAL_SETUP_GUIDE.md](LOCAL_SETUP_GUIDE.md):
+
+```bash
+./dev.sh up
+```
+
 ## How the system works
 
 ```text
