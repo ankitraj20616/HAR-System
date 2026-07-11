@@ -24,7 +24,7 @@ trap cleanup EXIT
 echo "Validating Compose configuration..."
 "${compose[@]}" config --quiet
 
-echo "Building and starting the Milestone 1 stack..."
+echo "Building and starting the Milestone 4 stack..."
 up_args=(up --detach --wait --wait-timeout "${SMOKE_TIMEOUT_SECONDS:-180}")
 if [[ "${SMOKE_SKIP_BUILD:-false}" == "true" ]]; then
   up_args+=(--no-build)
@@ -50,9 +50,9 @@ echo "Checking MQTT publish/subscribe..."
   mosquitto_sub -h localhost -p 1883 -t har/smoke -q 1 -C 1 -W 5 >"$output" &
   subscriber_pid=$!
   sleep 1
-  mosquitto_pub -h localhost -p 1883 -t har/smoke -q 1 -m milestone-1-ok
+  mosquitto_pub -h localhost -p 1883 -t har/smoke -q 1 -m milestone-4-ok
   wait "$subscriber_pid"
-  test "$(cat "$output")" = milestone-1-ok
+  test "$(cat "$output")" = milestone-4-ok
 '
 
 echo "Checking PostgreSQL readiness, initialized tables, and persistence..."
@@ -90,4 +90,10 @@ SELECT
 ROLLBACK;
 SQL
 
-echo "Milestone 1 infrastructure smoke test passed."
+echo "Checking dashboard API routing..."
+curl --fail --silent --show-error \
+  "http://localhost:${DASHBOARD_PORT:-5173}/api/status" >/dev/null
+curl --fail --silent --show-error \
+  "http://localhost:${DASHBOARD_PORT:-5173}/api/feedback/latest" >/dev/null
+
+echo "Milestone 4 stack smoke test passed."

@@ -27,6 +27,7 @@ SELECT
     AND to_regclass('idx_timeline_ts') IS NOT NULL
     AND to_regclass('idx_events_ts') IS NOT NULL
     AND to_regclass('idx_feedback_ts') IS NOT NULL
+    AND to_regclass('idx_feedback_idempotency_key') IS NOT NULL
     AND to_regclass('idx_timeline_unique_ts') IS NOT NULL
     AND to_regclass('idx_events_unique_type_ts') IS NOT NULL
 """
@@ -144,7 +145,25 @@ def insert_event(connection: Connection, event: HAREvent) -> int:
     )
 
 
-def insert_feedback(connection: Connection, feedback: Feedback) -> int:
+def _validate_idempotency_key(idempotency_key: str | None) -> str | None:
+    if idempotency_key is None:
+        return None
+    if not isinstance(idempotency_key, str):
+        raise TypeError("idempotency_key must be a string")
+    normalized = idempotency_key.strip()
+    if not normalized or len(normalized) > 255:
+        raise ValueError("idempotency_key must contain between 1 and 255 characters")
+    return normalized
+
+
+def insert_feedback(
+    connection: Connection,
+    feedback: Feedback,
+    idempotency_key: str | None = None,
+) -> int:
+    """Persist feedback, optionally returning the existing ID for a retry key."""
+
+    idempotency_key = _validate_idempotency_key(idempotency_key)
     payload = (
         feedback.model_dump(mode="json")
         if hasattr(feedback, "model_dump")
@@ -153,8 +172,11 @@ def insert_feedback(connection: Connection, feedback: Feedback) -> int:
     return _insert_returning_id(
         connection,
         """
-        INSERT INTO feedback (ts, mode, headline, detail, severity, payload)
-        VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+        INSERT INTO feedback
+            (ts, mode, headline, detail, severity, idempotency_key, payload)
+        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+        DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
         RETURNING id
         """,
         (
@@ -163,6 +185,7 @@ def insert_feedback(connection: Connection, feedback: Feedback) -> int:
             feedback.headline,
             feedback.detail,
             feedback.severity,
+            idempotency_key,
             json.dumps(payload),
         ),
     )
@@ -247,7 +270,7 @@ def get_recent_feedback(connection: Connection, limit: int = 100) -> list[dict[s
     return _fetch_dicts(
         connection,
         """
-        SELECT id, ts, mode, headline, detail, severity, payload
+        SELECT id, ts, mode, headline, detail, severity, payload, idempotency_key
         FROM feedback ORDER BY ts DESC, id DESC LIMIT %s
         """,
         (limit,),
@@ -278,6 +301,76 @@ def get_latest_event(connection: Connection) -> dict[str, Any] | None:
     )
 
 
+def get_latest_unacknowledged_critical_event(connection: Connection) -> dict[str, Any] | None:
+    """Return the newest critical alert that still requires acknowledgement."""
+
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, type, severity, confidence, evidence, acknowledged
+        FROM events
+        WHERE severity = 'critical' AND acknowledged = FALSE
+        ORDER BY ts DESC, id DESC LIMIT 1
+        """,
+        (),
+    )
+
+
+def get_latest_feedback(connection: Connection, mode: str | None = None) -> dict[str, Any] | None:
+    """Return newest feedback, optionally restricted to a validated mode."""
+
+    if mode is not None:
+        if not isinstance(mode, str):
+            raise TypeError("mode must be a string")
+        mode = mode.strip().lower()
+        if mode not in {"alert", "feedback", "summary"}:
+            raise ValueError("mode must be alert, feedback, or summary")
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, mode, headline, detail, severity, payload, idempotency_key
+        FROM feedback
+        WHERE (%s IS NULL OR mode = %s)
+        ORDER BY ts DESC, id DESC LIMIT 1
+        """,
+        (mode, mode),
+    )
+
+
+def get_feedback_by_idempotency_key(
+    connection: Connection, idempotency_key: str
+) -> dict[str, Any] | None:
+    idempotency_key = _validate_idempotency_key(idempotency_key)
+    return _fetch_one_dict(
+        connection,
+        """
+        SELECT id, ts, mode, headline, detail, severity, payload, idempotency_key
+        FROM feedback WHERE idempotency_key = %s
+        """,
+        (idempotency_key,),
+    )
+
+
+def get_feedback_between(
+    connection: Connection,
+    from_ts: datetime,
+    to_ts: datetime,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    _validate_time_range(from_ts, to_ts)
+    _validate_limit(limit)
+    return _fetch_dicts(
+        connection,
+        """
+        SELECT id, ts, mode, headline, detail, severity, payload, idempotency_key
+        FROM feedback
+        WHERE ts >= %s AND ts <= %s
+        ORDER BY ts ASC, id ASC LIMIT %s
+        """,
+        (from_ts, to_ts, limit),
+    )
+
+
 def get_activities_between(
     connection: Connection,
     from_ts: datetime,
@@ -292,9 +385,13 @@ def get_activities_between(
         connection,
         """
         SELECT id, ts, activity, confidence, sensor_label, video_label
-        FROM activity_timeline
-        WHERE ts >= %s AND ts <= %s
-        ORDER BY ts ASC, id ASC LIMIT %s
+        FROM (
+            SELECT id, ts, activity, confidence, sensor_label, video_label
+            FROM activity_timeline
+            WHERE ts >= %s AND ts <= %s
+            ORDER BY ts DESC, id DESC LIMIT %s
+        ) recent
+        ORDER BY ts ASC, id ASC
         """,
         (from_ts, to_ts, limit),
     )
@@ -314,9 +411,13 @@ def get_events_between(
         connection,
         """
         SELECT id, ts, type, severity, confidence, evidence, acknowledged
-        FROM events
-        WHERE ts >= %s AND ts <= %s
-        ORDER BY ts ASC, id ASC LIMIT %s
+        FROM (
+            SELECT id, ts, type, severity, confidence, evidence, acknowledged
+            FROM events
+            WHERE ts >= %s AND ts <= %s
+            ORDER BY ts DESC, id DESC LIMIT %s
+        ) recent
+        ORDER BY ts ASC, id ASC
         """,
         (from_ts, to_ts, limit),
     )
@@ -460,6 +561,10 @@ class EventRepository(BaseRepository):
         with self.connection() as connection:
             return get_latest_event(connection)
 
+    def latest_unacknowledged_critical(self) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_latest_unacknowledged_critical_event(connection)
+
     def get(self, event_id: int) -> dict[str, Any] | None:
         with self.connection() as connection:
             return get_event(connection, event_id)
@@ -476,10 +581,24 @@ class EventRepository(BaseRepository):
 
 
 class FeedbackRepository(BaseRepository):
-    def add(self, feedback: Feedback) -> int:
+    def add(self, feedback: Feedback, idempotency_key: str | None = None) -> int:
         with self.connection() as connection:
-            return insert_feedback(connection, feedback)
+            return insert_feedback(connection, feedback, idempotency_key)
 
     def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connection() as connection:
             return get_recent_feedback(connection, limit)
+
+    def latest(self, mode: str | None = None) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_latest_feedback(connection, mode)
+
+    def by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return get_feedback_by_idempotency_key(connection, idempotency_key)
+
+    def between(
+        self, from_ts: datetime, to_ts: datetime, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return get_feedback_between(connection, from_ts, to_ts, limit)

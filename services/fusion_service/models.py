@@ -25,6 +25,7 @@ class FusionStatusResponse(BaseModel):
     activity: ActivityLabel = ActivityLabel.UNKNOWN
     confidence: Confidence = 0.0
     last_update: datetime | None = None
+    data_status: Literal["current", "stale", "unavailable"] = "unavailable"
     modality_health: dict[Literal["sensor", "video"], ModalityStatus]
     components: dict[str, ComponentStatus] = Field(default_factory=dict)
 
@@ -36,6 +37,7 @@ class ActivityRecord(BaseModel):
     confidence: Confidence
     sensor_label: ActivityLabel | None = None
     video_label: ActivityLabel | None = None
+    duration_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class EventRecord(BaseModel):

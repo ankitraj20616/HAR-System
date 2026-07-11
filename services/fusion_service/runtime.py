@@ -371,6 +371,13 @@ class FusionMQTTDependency:
             activity=(activity.activity if activity else ActivityLabel.UNKNOWN),
             confidence=(activity.confidence if activity else 0.0),
             last_update=(activity.ts if activity else None),
+            data_status=(
+                "unavailable"
+                if activity is None
+                else "current"
+                if (timestamp - activity.ts).total_seconds() <= self.settings.stale_timeout_seconds
+                else "stale"
+            ),
             modality_health=modality_health,
             components={
                 "mqtt": ComponentStatus(

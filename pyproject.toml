@@ -1,7 +1,7 @@
 [project]
 name = "har-system"
-version = "0.1.0"
-description = "Foundation and shared contracts for the multi-modal HAR system"
+version = "0.4.0"
+description = "Multi-modal HAR monitoring system with caregiver dashboard and safe feedback"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
