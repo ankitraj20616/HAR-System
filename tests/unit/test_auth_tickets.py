@@ -31,8 +31,10 @@ def test_ticket_rejects_wrong_target_and_tampering() -> None:
 
     with pytest.raises(InvalidTicket, match="wrong target"):
         manager.consume(ticket, "fusion")
+    payload, signature = ticket.split(".", 1)
+    tampered_signature = ("A" if signature[0] != "A" else "B") + signature[1:]
     with pytest.raises(InvalidTicket, match="signature"):
-        manager.consume(ticket[:-1] + ("A" if ticket[-1] != "A" else "B"), "feedback")
+        manager.consume(f"{payload}.{tampered_signature}", "feedback")
 
 
 def test_ticket_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
