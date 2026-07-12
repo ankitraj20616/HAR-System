@@ -43,11 +43,15 @@ Mosquitto must be reachable. The Sensor Service should also be running if you wa
 predictions, and the Fusion Service should be running if you want final activity/history.
 
 The easiest option is to start the full project. This command already includes the built-in
-synthetic simulator:
+synthetic simulator. Configure Supabase and `.env` first as described in the
+[local setup guide](../LOCAL_SETUP_GUIDE.md):
 
 ```bash
-docker compose up --build --wait
+./dev.sh up
 ```
+
+User authentication protects dashboard REST/WebSocket access; it does not change simulator → MQTT
+→ Sensor → Fusion processing. Fusion/Feedback host ports remain private in secured Compose mode.
 
 For local Python usage, install the exact locked environment:
 
@@ -380,13 +384,13 @@ fill downstream queues, so use realistic pacing for latency demonstrations.
 Run simulator tests only:
 
 ```bash
-pytest tests/unit/test_simulator_datasets.py tests/unit/test_simulator_replay.py
+uv run pytest tests/unit/test_simulator_datasets.py tests/unit/test_simulator_replay.py
 ```
 
 Run the sensor-flow integration test:
 
 ```bash
-pytest tests/integration/test_simulator_sensor_flow.py
+uv run pytest tests/integration/test_simulator_sensor_flow.py
 ```
 
 Downloaded datasets are not required for the automated unit suite; tests use small synthetic

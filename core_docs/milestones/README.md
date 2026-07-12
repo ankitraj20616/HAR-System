@@ -38,6 +38,8 @@ An implemented milestone may also have:
 
 - `IMPLEMENTATION.md` — important decisions, delivered files, behavior, and limitations discovered
   while building it.
+- `RUNBOOK.md`, `SUPABASE_SETUP.md`, or `SECURITY_CHECKLIST.md` — setup, operations, and security
+  procedures needed outside source code.
 
 Read the FSD first if you want the product view. Read the TDD next if you are implementing or
 reviewing the code.
@@ -282,8 +284,10 @@ A milestone should be called complete only when:
 - Never put dataset ground truth inside inference MQTT messages.
 - Keep model names, thresholds, ports, and timing values configurable.
 - Do not log sensor windows, secrets, database URLs, or API keys.
-- Prefer local and open-source operation. Cloud providers are optional and must not block the local
-  demo.
+- Prefer local and open-source inference. Supabase is the explicit authentication dependency;
+  signup/login/refresh need network access, while valid JWT verification and HAR processing stay local.
+- Never send refresh tokens or service-role keys to Fusion, Feedback, browser URLs, or logs.
+- New signup role must remain `pending` until an admin approves it.
 - Add tests for normal behavior, invalid input, missing dependencies, duplicate messages, and restart
   behavior.
 
@@ -298,4 +302,5 @@ Suggested accepted milestone tags are:
 - `v0.2-m2`
 - `v0.3-m3`
 - `v0.4-m4`
+- `v0.6-m6-auth-rbac`
 - `v1.0-demo` or `v1.0-submission`

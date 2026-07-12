@@ -19,7 +19,7 @@ changing a row to `PASS` or `FAIL`.
 |---|---|---|
 | [verification-report.md](verification-report.md) | Run identity, metrics/result links, latency and recovery summary | `NOT RUN` |
 | [privacy-checklist.md](privacy-checklist.md) | Raw-frame, payload, storage, log, and artifact audit | `NOT RUN` |
-| [offline-checklist.md](offline-checklist.md) | Prepared full demo with external networking disabled | `NOT RUN` |
+| [offline-checklist.md](offline-checklist.md) | Local HAR processing with authentication dependency/scope recorded | `NOT RUN` |
 | [usability-notes.md](usability-notes.md) | Unprompted caregiver walkthrough observations | `NOT RUN` |
 | [dependency-inventory.md](dependency-inventory.md) | Runtime/build dependencies, sources, licenses, cost and offline status | `NOT RUN` |
 | [known-limitations.md](known-limitations.md) | Accepted constraints and open failures without hiding Must results | Review required |
@@ -45,6 +45,17 @@ Every result must identify:
 Screenshots may show the dashboard's derived activity/alert state, but not camera frames. A Must
 failure remains a release blocker even if it is documented as a known limitation.
 
+For Milestone 6, evidence must additionally record the Supabase project/config identity without
+recording keys or tokens, the tested role, expected `401`/`403` results, and the completed
+[`SECURITY_CHECKLIST.md`](../../milestone-6-auth-rbac/SECURITY_CHECKLIST.md). Do not paste JWTs,
+refresh tokens, service-role keys, confirmation links, or user passwords into evidence artifacts.
+
+“Offline” no longer means that a new user can sign up or log in without Supabase. Record separately:
+
+- local inference, MQTT, persistence and cached-JWKS JWT verification;
+- Supabase-dependent signup/login/refresh;
+- what happened when the network was removed and whether an already-issued JWT was still valid.
+
 ## Generate automated evidence
 
 After `uv sync --frozen`, run the repository gates from the project root:
@@ -52,6 +63,8 @@ After `uv sync --frozen`, run the repository gates from the project root:
 ```bash
 uv run python scripts/validate_deployment.py
 uv run python scripts/release_audit.py --output-dir artifacts/release
+uv run pytest -q tests/unit/test_auth_rbac.py tests/unit/test_auth_tickets.py \
+  tests/unit/test_supabase_jwt_verifier.py tests/integration/test_auth_gateway.py
 uv run python -m tests.metrics artifacts/captures/final-scenario.json \
   --output-dir artifacts/metrics/final
 ```

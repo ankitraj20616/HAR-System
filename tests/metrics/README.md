@@ -1,5 +1,9 @@
 # HAR metrics harness
 
+The metrics harness evaluates a frozen capture; it does not log in to Supabase or call protected
+dashboard APIs. Capture creation must still use the exact release commit/config and record whether
+data came through the authenticated gateway or an internal test harness.
+
 Run the illustrative fixed fixture with:
 
 ```bash
@@ -12,6 +16,9 @@ and `summary.md`. The bundled `release_demo_v1.json` exists to verify evaluator
 math and report generation. Its predictions are illustrative fixed values, **not
 measured model evidence**, and must not be quoted as final system performance.
 Replace it with the frozen release capture before producing report evidence.
+
+Do not include access JWTs, refresh tokens, service-role keys, emails, passwords, raw webcam frames,
+or personal data in scenario JSON or generated artifacts.
 
 Each sample keeps `ground_truth` separate from sensor, video, raw-fused, and
 smoothed-fused predictions and records `source_ts` plus the dashboard-receivable
@@ -28,3 +35,6 @@ Latency p95 uses linear interpolation at rank `(n - 1) * 0.95`.
 For final evidence, pass a frozen capture from the exact release commit and configuration, then link
 the generated artifacts from
 [`core_docs/milestones/milestone-5-verification-release/evidence/verification-report.md`](../../core_docs/milestones/milestone-5-verification-release/evidence/verification-report.md).
+
+Before accepting results, also run the deployment/release audit and Auth/RBAC tests documented in
+the [evidence package](../../core_docs/milestones/milestone-5-verification-release/evidence/README.md).

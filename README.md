@@ -61,15 +61,20 @@ Webcam --> numeric pose landmarks --> Video Service
                                   Fusion Service
                             alignment + voting + smoothing
                             fall/inactivity safety rules
-                              |                    |
-                              v                    v
-                         PostgreSQL          MQTT + WebSocket
-                     timeline and events      live consumers
+                              |
+                              v
+                         PostgreSQL
+                     timeline and events
+
+React Dashboard <--login/session--> Supabase Auth
+React Dashboard --Bearer JWT-------> Auth/RBAC Service
+Auth/RBAC Service --allowed only---> Fusion / Feedback REST + WebSocket
 ```
 
 The Fusion Service is the authoritative source. It stores a result in PostgreSQL before attempting
 live MQTT and WebSocket delivery. If a live consumer is temporarily unavailable, the saved history
-is still available from the REST API.
+is still available from the REST API. Browser REST/WebSocket traffic reaches Fusion and Feedback
+only through the Auth Service after JWT and role checks.
 
 ## Important safety behavior
 
@@ -92,6 +97,7 @@ For the easiest setup, install:
 - Docker Engine;
 - Docker Compose v2, available as `docker compose`;
 - at least 8 GB RAM;
+- a configured Supabase project and network access for signup/login/session refresh;
 - a webcam only if you want live video recognition.
 
 Python 3.11 or 3.12 is needed only for local development, tests, or running the simulator outside
@@ -99,11 +105,17 @@ Docker.
 
 ## Quick start with Docker
 
-First follow [the Supabase setup guide](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md)
-and create `.env` from `.env.example`. Then start the complete stack from the repository root:
+Create `.env` and check local prerequisites:
 
 ```bash
-docker compose up --build --wait
+./dev.sh setup
+```
+
+Then follow [the Supabase setup guide](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md),
+replace the auth placeholders in `.env`, and start the complete stack:
+
+```bash
+./dev.sh up
 ```
 
 This starts Mosquitto, PostgreSQL, five backend services, the dashboard, and a deterministic
@@ -282,13 +294,14 @@ then start the stack:
 ```bash
 ollama pull llama3.2:3b
 ollama serve
-docker compose up --build --wait
+./dev.sh up
 ```
 
 Request feedback through the dashboard or directly through its same-origin route:
 
 ```bash
-curl -X POST http://localhost:5173/api/feedback/generate \
+curl -X POST http://localhost:8005/api/feedback/generate \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"mode":"feedback","period":"24h","request_id":"demo-feedback-1"}'
 ```
@@ -308,9 +321,9 @@ Daily summaries run at the UTC time configured by `SUMMARY_SCHEDULE` using the d
 | `har/sensor/raw` | Simulator | Sensor Service | Raw numeric accelerometer/gyroscope window |
 | `har/sensor/prediction` | Sensor Service | Fusion Service | Sensor label, confidence, and motion intensity |
 | `har/video/prediction` | Video Service | Fusion Service | Video label, confidence, and body orientation |
-| `har/activity` | Fusion Service | Dashboard/Feedback | Authoritative fused activity |
-| `har/event` | Fusion Service | Dashboard/Feedback | Fall, inactivity, or abnormal-pattern event |
-| `har/feedback` | Feedback Service | Dashboard | Structured GenAI feedback in Milestone 4 |
+| `har/activity` | Fusion Service | Feedback Service | Authoritative fused activity; dashboard receives protected WebSocket copies |
+| `har/event` | Fusion Service | Feedback Service | Safety event; dashboard receives protected WebSocket copies |
+| `har/feedback` | Feedback Service | Other internal consumers | Structured feedback; dashboard receives protected WebSocket copies |
 
 Raw sensor messages use QoS 0 because they can be replayed. Predictions and final outputs use QoS 1.
 Duplicate QoS-1 delivery is handled safely by in-memory message deduplication and database uniqueness
@@ -376,6 +389,8 @@ Important groups are listed below. Every available setting and its safe default 
 | Group | Important settings |
 |---|---|
 | Shared | `LOG_LEVEL`, `MQTT_HOST`, `MQTT_PORT`, `DATABASE_URL` |
+| Authentication | `SUPABASE_URL`, publishable/service-role keys, JWT audience/algorithms |
+| Auth gateway | `AUTH_SERVICE_PORT`, `AUTH_TICKET_SECRET`, ticket TTL, upstream timeout |
 | Sensor | `WINDOW_SIZE`, `WINDOW_OVERLAP`, `SENSOR_MODEL_PATH`, `USE_FALLBACK` |
 | Video | `FPS`, `CAMERA_INDEX`, `MIN_VISIBILITY`, posture/motion thresholds |
 | Fusion | `MODALITY_WEIGHTS`, `FUSION_INTERVAL`, `ALIGNMENT_TOLERANCE_MS`, `SMOOTHING_WINDOW` |
@@ -410,9 +425,15 @@ uvicorn services.sensor_service.app:app --host 0.0.0.0 --port 8003
 uvicorn services.video_service.app:app --host 0.0.0.0 --port 8004
 uvicorn services.fusion_service.app:app --host 0.0.0.0 --port 8001
 uvicorn services.feedback_service.app:app --host 0.0.0.0 --port 8002
+FUSION_INTERNAL_URL=http://localhost:8001 \
+FEEDBACK_INTERNAL_URL=http://localhost:8002 \
+uvicorn services.auth_service.app:app --host 0.0.0.0 --port 8005
 ```
 
-Run each command in a separate terminal. The Video Service opens the configured host camera.
+Run each command in a separate terminal. Auth Service also needs the Supabase and ticket-secret
+variables documented in `.env.example`. The Video Service opens the configured host camera.
+For authenticated frontend development, the Compose dashboard is the supported default; see the
+standalone Vite caveat in [LOCAL_SETUP_GUIDE.md](LOCAL_SETUP_GUIDE.md).
 
 ## Tests and quality checks
 
@@ -446,9 +467,9 @@ Run the Docker smoke test:
 ./scripts/smoke.sh
 ```
 
-The smoke test validates Compose, starts the stack, checks HTTP health, performs an MQTT round trip,
-verifies that the built-in simulator reaches Fusion, and verifies PostgreSQL tables and temporary
-persistence. It keeps named volumes unless
+The smoke test validates Compose, starts the stack, checks HTTP health, verifies that a protected
+route without a token returns `401`, performs an MQTT round trip, verifies that the built-in
+simulator reaches Fusion, and verifies PostgreSQL tables and temporary persistence. It keeps named volumes unless
 `SMOKE_REMOVE_VOLUMES=true` is set.
 
 Validate release dependency/configuration pins and generate the repository audit:
@@ -501,6 +522,20 @@ docker compose ps
 docker compose logs mosquitto postgres fusion-service
 ```
 
+### Signup/login works but protected APIs return `401`
+
+- enable `public.custom_access_token_hook` in Supabase Authentication Hooks;
+- verify that the user has a recognized `user_role` claim;
+- confirm `SUPABASE_URL`, audience and asymmetric signing keys belong to the same project;
+- logout/login after changing a role so Supabase issues a refreshed JWT.
+
+Never print a real token in logs while troubleshooting.
+
+### Protected API returns `403`
+
+The identity is valid but the role cannot perform that action. New users remain `pending` until an
+admin assigns `caregiver`, `doctor`, or `admin`. Doctors cannot acknowledge alerts by design.
+
 ### Sensor predictions do not appear
 
 - confirm the simulator is connected to `localhost:1883`;
@@ -537,7 +572,7 @@ queries also default to the latest 24 hours, so provide a wider UTC range when r
 Change the host-facing value in `.env`, for example:
 
 ```dotenv
-FUSION_SERVICE_PORT=8101
+AUTH_SERVICE_PORT=8105
 POSTGRES_PORT=55432
 ```
 
@@ -556,6 +591,7 @@ services/
   auth_service/        Supabase JWT verification, RBAC, REST/WebSocket gateway
 shared/                Labels, schemas, topics, logging, database helpers and SQL
 simulator/             UCI HAR, WISDM and SisFall loaders plus replay engine
+supabase/              Hosted-auth role schema, trigger, audit, and JWT-hook migration
 tests/                 Unit, contract and integration tests
 ```
 
@@ -564,6 +600,7 @@ tests/                 Unit, contract and integration tests
 - [Functional specification](core_docs/FUNCTIONAL_SPEC.md)
 - [Technical design](core_docs/TECHNICAL_DESIGN.md)
 - [Milestone delivery map](core_docs/milestones/README.md)
+- [Complete local setup guide](LOCAL_SETUP_GUIDE.md)
 - [Milestone 3 functional scope](core_docs/milestones/milestone-3-fusion-safety/FSD.md)
 - [Milestone 3 technical design](core_docs/milestones/milestone-3-fusion-safety/TDD.md)
 - [Milestone 3 implementation notes](core_docs/milestones/milestone-3-fusion-safety/IMPLEMENTATION.md)
@@ -580,6 +617,7 @@ tests/                 Unit, contract and integration tests
 - [Supabase setup guide](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md)
 - [Auth/RBAC runbook](core_docs/milestones/milestone-6-auth-rbac/RUNBOOK.md)
 - [Auth/RBAC security checklist](core_docs/milestones/milestone-6-auth-rbac/SECURITY_CHECKLIST.md)
+- [Easy Hinglish learning guides](core_docs/learning/)
 - [Branching strategy](core_docs/BRANCHING_STRATEGY.md)
 
 ## Privacy and project limitations
@@ -594,3 +632,5 @@ tests/                 Unit, contract and integration tests
 - Model and dataset files belong under `data/` and are intentionally excluded from version control.
 - Recognition quality depends on the webcam view, dataset fit, model artifact, and tuned thresholds.
 - Safety events are assistive signals, not guaranteed emergency detection.
+- Supabase network access is required for signup/login/session refresh; HAR inference remains local.
+- RBAC protects actions in the current single monitored context; multi-patient tenant isolation is future scope.
