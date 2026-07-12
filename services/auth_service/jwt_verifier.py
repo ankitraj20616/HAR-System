@@ -32,12 +32,19 @@ class SupabaseJWTVerifier:
     async def verify(self, token: str) -> AuthenticatedUser:
         try:
             claims = await self._decode(token)
+            email = claims.get("email")
             role = claims.get("user_role")
+            # Bootstrap super administrators by verified email. Their signed token
+            # is trusted for the admin role even before Supabase assigns one, so
+            # they can allocate roles to everyone else.
+            normalized_email = email.strip().lower() if isinstance(email, str) else ""
+            if normalized_email in self.settings.super_admin_email_set:
+                role = "admin"
             if role not in {"pending", "caregiver", "doctor", "admin"}:
                 raise InvalidAccessToken("access token has no recognized user role")
             return AuthenticatedUser(
                 user_id=str(claims["sub"]),
-                email=claims.get("email"),
+                email=email,
                 role=role,
                 session_id=str(claims["session_id"]),
             )

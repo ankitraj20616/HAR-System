@@ -28,6 +28,10 @@ class AuthSettings(Settings):
     auth_ticket_secret: str = "local-import-only-change-in-env-0000"
     auth_ticket_ttl_seconds: int = Field(default=30, ge=5, le=120)
     auth_upstream_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # Bootstrap super administrators. Comma-separated emails granted the admin
+    # role even before Supabase assigns one, so they can allocate roles to
+    # everyone else. Backend-only; never expose with a VITE_ prefix.
+    super_admin_emails: str = ""
 
     @field_validator(
         "supabase_url",
@@ -62,6 +66,14 @@ class AuthSettings(Settings):
         if not algorithms or any(value not in {"RS256", "ES256"} for value in algorithms):
             raise ValueError("SUPABASE_JWT_ALGORITHMS may contain only RS256 and ES256")
         return self
+
+    @property
+    def super_admin_email_set(self) -> frozenset[str]:
+        return frozenset(
+            value.strip().lower()
+            for value in self.super_admin_emails.split(",")
+            if value.strip()
+        )
 
     @property
     def issuer(self) -> str:

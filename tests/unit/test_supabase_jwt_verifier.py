@@ -7,11 +7,12 @@ from services.auth_service.config import AuthSettings
 from services.auth_service.jwt_verifier import InvalidAccessToken, SupabaseJWTVerifier
 
 
-def settings() -> AuthSettings:
+def settings(*, super_admin_emails: str = "") -> AuthSettings:
     return AuthSettings(
         supabase_url="https://project.supabase.co",
         supabase_publishable_key="publishable",
         auth_ticket_secret="t" * 32,
+        super_admin_emails=super_admin_emails,
     )
 
 
@@ -29,8 +30,10 @@ def claims(*, role: str = "caregiver") -> dict[str, object]:
     }
 
 
-def verifier(payload: dict[str, object]) -> SupabaseJWTVerifier:
-    instance = SupabaseJWTVerifier(settings())
+def verifier(
+    payload: dict[str, object], *, super_admin_emails: str = ""
+) -> SupabaseJWTVerifier:
+    instance = SupabaseJWTVerifier(settings(super_admin_emails=super_admin_emails))
 
     async def decode(_token: str):
         return payload
@@ -50,6 +53,39 @@ def test_valid_verified_claims_become_identity() -> None:
 def test_unknown_application_role_is_rejected(role: str) -> None:
     with pytest.raises(InvalidAccessToken, match="recognized user role"):
         asyncio.run(verifier(claims(role=role)).verify("signed-token"))
+
+
+def test_super_admin_email_is_bootstrapped_without_role_claim() -> None:
+    payload = claims()
+    del payload["user_role"]
+    payload["email"] = "boss@example.com"
+
+    identity = asyncio.run(
+        verifier(payload, super_admin_emails="boss@example.com").verify("signed-token")
+    )
+
+    assert identity.role == "admin"
+
+
+def test_super_admin_match_is_case_insensitive_and_elevates_lower_roles() -> None:
+    identity = asyncio.run(
+        verifier(
+            claims(role="pending") | {"email": "Boss@Example.com"},
+            super_admin_emails="  boss@example.com , other@example.com ",
+        ).verify("signed-token")
+    )
+
+    assert identity.role == "admin"
+
+
+def test_non_super_admin_still_requires_recognized_role() -> None:
+    payload = claims()
+    del payload["user_role"]
+
+    with pytest.raises(InvalidAccessToken, match="recognized user role"):
+        asyncio.run(
+            verifier(payload, super_admin_emails="boss@example.com").verify("signed-token")
+        )
 
 
 def test_signature_or_standard_claim_failure_is_sanitized() -> None:
