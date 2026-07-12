@@ -149,6 +149,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -216,3 +218,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# HAR datasets, model weights, and local runtime state
+data/*
+!data/.gitkeep
+models/
+*.onnx
+*.pt
+*.pth
+*.h5
+*.tflite
+mosquitto/data/
+mosquitto/log/
+
+# Frontend dependencies and build output
+node_modules/
+dashboard/dist/
+
+# Operating-system and editor files
+.DS_Store
+.idea/
+.vscode/

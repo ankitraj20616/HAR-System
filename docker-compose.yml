@@ -1,0 +1,279 @@
+name: har-system
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: har-backend:${IMAGE_TAG:-dev}
+  restart: unless-stopped
+  init: true
+  networks:
+    - har-network
+  environment: &backend-environment
+    SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    MESSAGE_SCHEMA_VERSION: ${MESSAGE_SCHEMA_VERSION:-1.0}
+    MQTT_HOST: mosquitto
+    MQTT_PORT: 1883
+    DATABASE_URL: postgresql://${POSTGRES_USER:-har_user}:${POSTGRES_PASSWORD:-har_dev_password}@postgres:5432/${POSTGRES_DB:-har_db}
+
+x-api-healthcheck: &api-healthcheck
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 15s
+
+services:
+  postgres:
+    image: postgres:16.9-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-har_db}
+      POSTGRES_USER: ${POSTGRES_USER:-har_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-har_dev_password}
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./shared/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - har-network
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.21
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -p 1883 -t har/health -m healthy -q 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - har-network
+
+  sensor-service:
+    <<: *backend
+    command: ["uvicorn", "services.sensor_service.app:app", "--host", "0.0.0.0", "--port", "8003"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: sensor-service
+      SERVICE_PORT: 8003
+      WINDOW_SIZE: ${WINDOW_SIZE:-128}
+      WINDOW_OVERLAP: ${WINDOW_OVERLAP:-0.5}
+      SENSOR_MODEL_ID: ${SENSOR_MODEL_ID:-STMicroelectronics/IGN-HAR-model}
+      SENSOR_MODEL_REVISION: ${SENSOR_MODEL_REVISION:-69f07d89b9520c9ab4424fafed6d079c3d12b26d}
+      SENSOR_MODEL_PATH: ${SENSOR_MODEL_PATH:-}
+      SENSOR_MODEL_LABELS: ${SENSOR_MODEL_LABELS:-}
+      USE_FALLBACK: ${USE_FALLBACK:-true}
+      ACCEL_UNIT: ${ACCEL_UNIT:-g}
+      GYRO_UNIT: ${GYRO_UNIT:-rad_s}
+      ACCEL_SCALE: ${ACCEL_SCALE:-1.0}
+      GYRO_SCALE: ${GYRO_SCALE:-1.0}
+      MODEL_INPUT_MEAN: ${MODEL_INPUT_MEAN:-0.0}
+      MODEL_INPUT_STD: ${MODEL_INPUT_STD:-1.0}
+      MODEL_SUPPRESS_GRAVITY: ${MODEL_SUPPRESS_GRAVITY:-true}
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${SENSOR_SERVICE_PORT:-8003}:8003"
+    volumes:
+      - ./data/models:/models:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8003/health',timeout=2)); assert data['status'] in ('healthy','degraded')"]
+
+  simulator:
+    <<: *backend
+    command: ["python", "-m", "simulator.demo"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: simulator
+      SIMULATOR_DEVICE_ID: ${SIMULATOR_DEVICE_ID:-demo-sim-01}
+      SIMULATOR_SAMPLING_HZ: ${SIMULATOR_SAMPLING_HZ:-50}
+      SIMULATOR_CHUNK_SECONDS: ${SIMULATOR_CHUNK_SECONDS:-0.5}
+      SIMULATOR_SCENARIO_SECONDS: ${SIMULATOR_SCENARIO_SECONDS:-12}
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      sensor-service:
+        condition: service_healthy
+
+  video-service:
+    <<: *backend
+    command: ["uvicorn", "services.video_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: video-service
+      SERVICE_PORT: 8004
+      FPS: ${FPS:-12}
+      CAMERA_INDEX: ${CAMERA_INDEX:-0}
+      MIN_VISIBILITY: ${MIN_VISIBILITY:-0.6}
+      HORIZONTAL_ANGLE_THRESHOLD: ${HORIZONTAL_ANGLE_THRESHOLD:-25}
+      SITTING_JOINT_ANGLE: ${SITTING_JOINT_ANGLE:-135}
+      STANDING_JOINT_ANGLE: ${STANDING_JOINT_ANGLE:-155}
+      MOTION_HISTORY_LENGTH: ${MOTION_HISTORY_LENGTH:-12}
+      WALKING_MOTION_THRESHOLD: ${WALKING_MOTION_THRESHOLD:-0.018}
+      EXERCISE_MOTION_THRESHOLD: ${EXERCISE_MOTION_THRESHOLD:-0.045}
+      RECONNECT_ATTEMPTS: ${RECONNECT_ATTEMPTS:-5}
+      RECONNECT_INITIAL_BACKOFF: ${RECONNECT_INITIAL_BACKOFF:-0.25}
+      RECONNECT_MAX_BACKOFF: ${RECONNECT_MAX_BACKOFF:-5.0}
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${VIDEO_SERVICE_PORT:-8004}:8004"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8004/health',timeout=2)); assert data['status'] in ('healthy','degraded')"]
+
+  fusion-service:
+    <<: *backend
+    command: ["uvicorn", "services.fusion_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: fusion-service
+      SERVICE_PORT: 8001
+      MODALITY_WEIGHTS: ${MODALITY_WEIGHTS:-sensor=0.5,video=0.5}
+      SMOOTHING_WINDOW: ${SMOOTHING_WINDOW:-5}
+      FUSION_INTERVAL: ${FUSION_INTERVAL:-1.0}
+      ALIGNMENT_TOLERANCE_MS: ${ALIGNMENT_TOLERANCE_MS:-1300}
+      BUFFER_RETENTION_MS: ${BUFFER_RETENTION_MS:-10000}
+      BUFFER_MAX_SIZE: ${BUFFER_MAX_SIZE:-256}
+      STALE_TIMEOUT_SECONDS: ${STALE_TIMEOUT_SECONDS:-3.0}
+      FALL_ACCEL_THRESHOLD: ${FALL_ACCEL_THRESHOLD:-2.5}
+      FALL_CORRELATION_MS: ${FALL_CORRELATION_MS:-1500}
+      FALL_COOLDOWN_SECONDS: ${FALL_COOLDOWN_SECONDS:-30}
+      FALL_RECOVERY_TIMEOUT_SECONDS: ${FALL_RECOVERY_TIMEOUT_SECONDS:-60}
+      INACTIVITY_SECONDS: ${INACTIVITY_SECONDS:-1800}
+      INACTIVITY_MOTION_THRESHOLD: ${INACTIVITY_MOTION_THRESHOLD:-0.08}
+      ABNORMAL_MIN_SECONDS: ${ABNORMAL_MIN_SECONDS:-3600}
+      ABNORMAL_BASELINE_SAMPLES: ${ABNORMAL_BASELINE_SAMPLES:-5}
+      ABNORMAL_BASELINE_MULTIPLIER: ${ABNORMAL_BASELINE_MULTIPLIER:-3.0}
+      WEBSOCKET_QUEUE_SIZE: ${WEBSOCKET_QUEUE_SIZE:-64}
+      INPUT_QUEUE_SIZE: ${INPUT_QUEUE_SIZE:-512}
+      API_MAX_LIMIT: ${API_MAX_LIMIT:-1000}
+    expose:
+      - "8001"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8001/health',timeout=2)); assert data['status']=='healthy'"]
+
+  feedback-service:
+    <<: *backend
+    command: ["uvicorn", "services.feedback_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: feedback-service
+      SERVICE_PORT: 8002
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-llama3.2:3b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      GENERATION_TIMEOUT: ${GENERATION_TIMEOUT:-30}
+      FEEDBACK_INTERVAL: ${FEEDBACK_INTERVAL:-900}
+      SUMMARY_SCHEDULE: ${SUMMARY_SCHEDULE:-0 20 * * *}
+      MAXIMUM_DIGEST_SIZE: ${MAXIMUM_DIGEST_SIZE:-12000}
+      FEEDBACK_FALLBACK_ENABLED: ${FEEDBACK_FALLBACK_ENABLED:-true}
+      FEEDBACK_MAX_RECOMMENDATIONS: ${FEEDBACK_MAX_RECOMMENDATIONS:-5}
+      FEEDBACK_DEFAULT_PERIOD_HOURS: ${FEEDBACK_DEFAULT_PERIOD_HOURS:-24}
+      FEEDBACK_API_MAX_PERIOD_DAYS: ${FEEDBACK_API_MAX_PERIOD_DAYS:-30}
+      FEEDBACK_INPUT_QUEUE_SIZE: ${FEEDBACK_INPUT_QUEUE_SIZE:-128}
+      FEEDBACK_WEBSOCKET_QUEUE_SIZE: ${FEEDBACK_WEBSOCKET_QUEUE_SIZE:-64}
+    expose:
+      - "8002"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8002/health',timeout=2)); assert data['status']=='healthy'"]
+
+  auth-service:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: services/auth_service/Dockerfile
+    image: har-auth:${IMAGE_TAG:-dev}
+    command: ["uvicorn", "services.auth_service.app:app", "--host", "0.0.0.0", "--port", "8005"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: auth-service
+      AUTH_PORT: 8005
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in .env}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set SUPABASE_PUBLISHABLE_KEY in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_JWT_ALGORITHMS: ${SUPABASE_JWT_ALGORITHMS:-RS256,ES256}
+      AUTH_TICKET_SECRET: ${AUTH_TICKET_SECRET:?Set a random 32+ character AUTH_TICKET_SECRET in .env}
+      AUTH_TICKET_TTL_SECONDS: ${AUTH_TICKET_TTL_SECONDS:-30}
+      AUTH_UPSTREAM_TIMEOUT_SECONDS: ${AUTH_UPSTREAM_TIMEOUT_SECONDS:-10}
+      FUSION_INTERNAL_URL: http://fusion-service:8001
+      FEEDBACK_INTERNAL_URL: http://feedback-service:8002
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${AUTH_SERVICE_PORT:-8005}:8005"
+    depends_on:
+      fusion-service:
+        condition: service_healthy
+      feedback-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8005/health',timeout=2)); assert data['status']=='healthy'"]
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: har-dashboard:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-5173}:80"
+    depends_on:
+      simulator:
+        condition: service_started
+      sensor-service:
+        condition: service_healthy
+      video-service:
+        condition: service_healthy
+      fusion-service:
+        condition: service_healthy
+      feedback-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - har-network
+
+volumes:
+  postgres-data:
+  mosquitto-data:
+
+networks:
+  har-network:
+    driver: bridge

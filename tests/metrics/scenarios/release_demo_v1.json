@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "dataset": "Illustrative HAR evaluator fixture (not measured inference evidence)",
+    "dataset_version": "release-demo-v1-fixture",
+    "model_id": "illustrative-fixed-predictions",
+    "model_revision": "fixture-v1",
+    "seed": 20250601
+  },
+  "scenario_selection": [
+    "walking", "sitting", "standing", "lying", "exercising", "unknown/no-person",
+    "true fall", "ordinary lying control", "vigorous upright control", "horizontal no-spike control"
+  ],
+  "label_mapping": {
+    "WALKING_UPSTAIRS": "WALKING",
+    "RUNNING": "EXERCISING",
+    "LAYING": "LYING"
+  },
+  "config": {
+    "fall_match_tolerance_seconds": 2.0,
+    "sensor_weight": 0.55,
+    "video_weight": 0.45,
+    "smoothing_window": 3,
+    "fall_accel_threshold": 2.5
+  },
+  "samples": [
+    {"id":"walk-1","scenario":"normal-walking","ground_truth":"WALKING","sensor_prediction":"WALKING","video_prediction":"STANDING","raw_fused_prediction":"WALKING","smoothed_fused_prediction":"WALKING","source_ts":"2025-06-01T10:00:00Z","websocket_ts":"2025-06-01T10:00:00.420Z"},
+    {"id":"walk-2","scenario":"normal-walking","ground_truth":"WALKING","sensor_prediction":"WALKING","video_prediction":"WALKING","raw_fused_prediction":"WALKING","smoothed_fused_prediction":"WALKING","source_ts":"2025-06-01T10:00:01Z","websocket_ts":"2025-06-01T10:00:01.460Z"},
+    {"id":"sit-1","scenario":"normal-sitting","ground_truth":"SITTING","sensor_prediction":"STANDING","video_prediction":"SITTING","raw_fused_prediction":"SITTING","smoothed_fused_prediction":"SITTING","source_ts":"2025-06-01T10:00:02Z","websocket_ts":"2025-06-01T10:00:02.510Z"},
+    {"id":"sit-2","scenario":"normal-sitting","ground_truth":"SITTING","sensor_prediction":"SITTING","video_prediction":"SITTING","raw_fused_prediction":"SITTING","smoothed_fused_prediction":"SITTING","source_ts":"2025-06-01T10:00:03Z","websocket_ts":"2025-06-01T10:00:03.450Z"},
+    {"id":"stand-1","scenario":"normal-standing","ground_truth":"STANDING","sensor_prediction":"STANDING","video_prediction":"STANDING","raw_fused_prediction":"STANDING","smoothed_fused_prediction":"STANDING","source_ts":"2025-06-01T10:00:04Z","websocket_ts":"2025-06-01T10:00:04.530Z"},
+    {"id":"stand-2","scenario":"vigorous-motion-upright-control","ground_truth":"STANDING","sensor_prediction":"SITTING","video_prediction":"STANDING","raw_fused_prediction":"STANDING","smoothed_fused_prediction":"STANDING","source_ts":"2025-06-01T10:00:05Z","websocket_ts":"2025-06-01T10:00:05.490Z"},
+    {"id":"lie-1","scenario":"ordinary-lying-control","ground_truth":"LYING","sensor_prediction":"SITTING","video_prediction":"LYING","raw_fused_prediction":"LYING","smoothed_fused_prediction":"LYING","source_ts":"2025-06-01T10:00:06Z","websocket_ts":"2025-06-01T10:00:06.570Z"},
+    {"id":"lie-2","scenario":"horizontal-without-spike-control","ground_truth":"LYING","sensor_prediction":"LYING","video_prediction":"LYING","raw_fused_prediction":"LYING","smoothed_fused_prediction":"LYING","source_ts":"2025-06-01T10:00:07Z","websocket_ts":"2025-06-01T10:00:07.610Z"},
+    {"id":"exercise-1","scenario":"normal-exercising","ground_truth":"EXERCISING","sensor_prediction":"EXERCISING","video_prediction":"WALKING","raw_fused_prediction":"EXERCISING","smoothed_fused_prediction":"EXERCISING","source_ts":"2025-06-01T10:00:08Z","websocket_ts":"2025-06-01T10:00:08.600Z"},
+    {"id":"exercise-2","scenario":"normal-exercising","ground_truth":"EXERCISING","sensor_prediction":"EXERCISING","video_prediction":"EXERCISING","raw_fused_prediction":"EXERCISING","smoothed_fused_prediction":"EXERCISING","source_ts":"2025-06-01T10:00:09Z","websocket_ts":"2025-06-01T10:00:09.640Z"},
+    {"id":"unknown-1","scenario":"unknown-no-person","ground_truth":"UNKNOWN","sensor_prediction":"UNKNOWN","video_prediction":"UNKNOWN","raw_fused_prediction":"UNKNOWN","smoothed_fused_prediction":"UNKNOWN","source_ts":"2025-06-01T10:00:10Z","websocket_ts":"2025-06-01T10:00:10.390Z"},
+    {"id":"unknown-2","scenario":"unknown-no-person","ground_truth":"UNKNOWN","sensor_prediction":"WALKING","video_prediction":"UNKNOWN","raw_fused_prediction":"UNKNOWN","smoothed_fused_prediction":"UNKNOWN","source_ts":"2025-06-01T10:00:11Z","websocket_ts":"2025-06-01T10:00:11.430Z"}
+  ],
+  "ground_truth_events": [
+    {"id":"fall-ground-truth-1","scenario":"true-fall-spike-plus-horizontal","type":"FALL","ts":"2025-06-01T10:00:20Z"}
+  ],
+  "predicted_events": [
+    {"id":"fall-alert-1","scenario":"true-fall-spike-plus-horizontal","type":"FALL","ts":"2025-06-01T10:00:20.300Z","source_ts":"2025-06-01T10:00:20Z","websocket_ts":"2025-06-01T10:00:21.100Z"}
+  ]
+}

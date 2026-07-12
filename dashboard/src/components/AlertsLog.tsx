@@ -1,0 +1,7 @@
+import type { EventRecord } from '../types';
+import { formatTime, label, Panel, StateMessage } from './common';
+
+export function AlertsLog({ events, loading, error, pendingId, onAcknowledge, retry }: { events: EventRecord[]; loading: boolean; error?: string; pendingId?: number; onAcknowledge: (id: number) => void; retry: () => void }) {
+  const sorted = [...events].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  return <Panel title="Alerts" id="alerts">{loading ? <StateMessage kind="loading">Loading alerts…</StateMessage> : error ? <StateMessage kind="error" retry={retry}>{error}</StateMessage> : !sorted.length ? <StateMessage kind="empty">No safety alerts were recorded in this period.</StateMessage> : <ul className="alerts-list">{sorted.map(event => <li key={event.id} className={`${event.acknowledged ? 'acknowledged' : 'new'} severity-${event.severity}`}><div><div className="alert-title"><span className="badge">{event.acknowledged ? 'Seen' : 'New'}</span><strong>{label(event.type)}</strong></div><p>{formatTime(event.ts)} · {Math.round(event.confidence * 100)}% confidence</p><details><summary>Detection details</summary><pre>{JSON.stringify(event.evidence, null, 2)}</pre></details></div>{!event.acknowledged && <button className="button secondary" disabled={pendingId === event.id} onClick={() => onAcknowledge(event.id)}>{pendingId === event.id ? 'Saving…' : 'Mark as seen'}</button>}</li>)}</ul>}</Panel>;
+}
