@@ -164,8 +164,8 @@ services:
       WEBSOCKET_QUEUE_SIZE: ${WEBSOCKET_QUEUE_SIZE:-64}
       INPUT_QUEUE_SIZE: ${INPUT_QUEUE_SIZE:-512}
       API_MAX_LIMIT: ${API_MAX_LIMIT:-1000}
-    ports:
-      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${FUSION_SERVICE_PORT:-8001}:8001"
+    expose:
+      - "8001"
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -195,8 +195,8 @@ services:
       FEEDBACK_API_MAX_PERIOD_DAYS: ${FEEDBACK_API_MAX_PERIOD_DAYS:-30}
       FEEDBACK_INPUT_QUEUE_SIZE: ${FEEDBACK_INPUT_QUEUE_SIZE:-128}
       FEEDBACK_WEBSOCKET_QUEUE_SIZE: ${FEEDBACK_WEBSOCKET_QUEUE_SIZE:-64}
-    ports:
-      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${FEEDBACK_SERVICE_PORT:-8002}:8002"
+    expose:
+      - "8002"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -207,6 +207,38 @@ services:
     healthcheck:
       <<: *api-healthcheck
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8002/health',timeout=2)); assert data['status']=='healthy'"]
+
+  auth-service:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: services/auth_service/Dockerfile
+    image: har-auth:${IMAGE_TAG:-dev}
+    command: ["uvicorn", "services.auth_service.app:app", "--host", "0.0.0.0", "--port", "8005"]
+    environment:
+      <<: *backend-environment
+      SERVICE_NAME: auth-service
+      AUTH_PORT: 8005
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in .env}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set SUPABASE_PUBLISHABLE_KEY in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_JWT_ALGORITHMS: ${SUPABASE_JWT_ALGORITHMS:-RS256,ES256}
+      AUTH_TICKET_SECRET: ${AUTH_TICKET_SECRET:?Set a random 32+ character AUTH_TICKET_SECRET in .env}
+      AUTH_TICKET_TTL_SECONDS: ${AUTH_TICKET_TTL_SECONDS:-30}
+      AUTH_UPSTREAM_TIMEOUT_SECONDS: ${AUTH_UPSTREAM_TIMEOUT_SECONDS:-10}
+      FUSION_INTERNAL_URL: http://fusion-service:8001
+      FEEDBACK_INTERNAL_URL: http://feedback-service:8002
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${AUTH_SERVICE_PORT:-8005}:8005"
+    depends_on:
+      fusion-service:
+        condition: service_healthy
+      feedback-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *api-healthcheck
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8005/health',timeout=2)); assert data['status']=='healthy'"]
 
   dashboard:
     build:
@@ -226,6 +258,8 @@ services:
       fusion-service:
         condition: service_healthy
       feedback-service:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]

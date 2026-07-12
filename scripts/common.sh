@@ -41,6 +41,15 @@ ensure_local_env() {
   mkdir -p data/models
 }
 
+require_auth_env() {
+  [[ -f .env ]] || die "Run './dev.sh setup', then configure Supabase in .env."
+  if grep --quiet '^SUPABASE_URL=https://your-project-id\.supabase\.co$' .env \
+    || grep --quiet '^SUPABASE_PUBLISHABLE_KEY=sb_publishable_replace_me$' .env \
+    || grep --quiet '^AUTH_TICKET_SECRET=replace-with-at-least-32-random-characters$' .env; then
+    die "Configure SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, and AUTH_TICKET_SECRET in .env. See core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md."
+  fi
+}
+
 service_exists() {
   local wanted="$1"
   "${COMPOSE[@]}" config --services | grep --fixed-strings --line-regexp --quiet "$wanted"

@@ -9,6 +9,7 @@ def test_milestone_one_repository_boundaries_exist() -> None:
         "services/video_service",
         "services/fusion_service",
         "services/feedback_service",
+        "services/auth_service",
         "shared",
         "simulator",
         "dashboard",

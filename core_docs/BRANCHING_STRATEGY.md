@@ -12,7 +12,7 @@
 
 > This document defines how the 4-person team uses Git and GitHub: which branches exist, how features
 > flow into `main`, naming rules, commit conventions, pull-request and review process, and how this maps
-> onto the five microservices and the 10-phase roadmap in the TDD. Keep it simple — this is a small,
+> onto the six microservices and the roadmap in the TDD. Keep it simple — this is a small,
 > co-located student team, not a 50-engineer org.
 
 ---
@@ -23,7 +23,7 @@
   `docker compose up` from a fresh checkout. Broken code never lives on `main`.
 - **One feature = one branch = one pull request.** Small, reviewable units.
 - **No direct commits to `main`.** Everything lands through a reviewed PR.
-- **Microservice ownership.** Each of the five services has a primary owner, so branches rarely
+- **Microservice ownership.** Each of the six services has a primary owner, so branches rarely
   conflict — the team works in parallel on independent service folders.
 - **Lightweight, not heavy.** We use a trimmed **GitHub Flow** model (single long-lived branch +
   short-lived feature branches), *not* full Git Flow with `develop`/`release`/`hotfix`. A 4-person
@@ -96,6 +96,7 @@ All work happens on a branch cut **from the latest `main`**, then merged back vi
 | `video` | Video Service (MediaPipe Pose) |
 | `fusion` | Fusion / HAR Service (voting + fall logic) |
 | `feedback` | Feedback Service (Ollama local LLM) |
+| `auth` | Supabase authentication, JWT gateway, and RBAC |
 | `dashboard` | Dashboard / UI |
 | `sim` | Sensor simulator (dataset replay) |
 | `broker` / `infra` | Mosquitto, Docker, PostgreSQL, compose |
@@ -125,6 +126,7 @@ touch their area. (Adjust the assignments to match the team's actual division.)
 | Video Service | _TBD_ | _TBD_ |
 | Fusion / HAR Service | _TBD_ | _TBD_ |
 | Feedback Service (Ollama) | _TBD_ | _TBD_ |
+| Auth Service + Supabase | _TBD_ | _TBD_ |
 | Dashboard + Infra (Docker/MQTT/DB) | _TBD_ | _TBD_ |
 
 > Fill in the four names (Ankit, Suman, Tanzeem, Aman) once the team agrees. Each member should be a

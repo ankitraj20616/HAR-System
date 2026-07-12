@@ -70,14 +70,14 @@ export default function App() {
     };
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const fusionUrl = String(import.meta.env.VITE_FUSION_WS_URL || `${protocol}//${location.host}/ws`);
-    const socket = new LiveSocket(onMessage, (state, reconnected) => { setConnection(state); if (state === 'connected') setLastMessage(Date.now()); if (reconnected) refreshAll(); }, fusionUrl);
+    const socket = new LiveSocket(onMessage, (state, reconnected) => { setConnection(state); if (state === 'connected') setLastMessage(Date.now()); if (reconnected) refreshAll(); }, 'fusion', fusionUrl);
     socket.start(); return () => { socket.stop(); window.clearTimeout(liveRefreshTimer.current); };
   }, [loadCritical, loadRange, range, refreshAll]);
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const feedbackUrl = String(import.meta.env.VITE_FEEDBACK_WS_URL || `${protocol}//${location.host}/feedback-ws`);
-    const socket = new LiveSocket(envelope => { if (envelope.channel === 'feedback') setFeedback(envelope.data); }, (state, reconnected) => { if (state === 'connected' && reconnected) void loadFeedback(); }, feedbackUrl);
+    const socket = new LiveSocket(envelope => { if (envelope.channel === 'feedback') setFeedback(envelope.data); }, (state, reconnected) => { if (state === 'connected' && reconnected) void loadFeedback(); }, 'feedback', feedbackUrl);
     socket.start(); return () => socket.stop();
   }, [loadFeedback]);
 

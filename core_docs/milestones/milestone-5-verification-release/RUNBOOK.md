@@ -108,9 +108,10 @@ Inspect container and API state before demonstrating recognition:
 
 ```bash
 docker compose ps
-for port in 8001 8002 8003 8004; do curl --fail --silent "http://localhost:${port}/health"; echo; done
+for port in 8005 8003 8004; do curl --fail --silent "http://localhost:${port}/health"; echo; done
 curl --fail --silent http://localhost:5173/health; echo
-curl --fail --silent http://localhost:8001/api/status; echo
+docker compose exec -T fusion-service python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/health').read().decode())"
 ```
 
 PostgreSQL, Mosquitto, Fusion, Feedback, Sensor, and dashboard should be running. Fusion must report
@@ -118,6 +119,8 @@ healthy MQTT/database dependencies. Sensor may explicitly report degraded when t
 model is absent and deterministic fallback is enabled. Video may report degraded until a camera is
 available. For the full fusion demo, `/api/status` must show both modalities online after replay and
 camera predictions begin; do not record that check as passed merely because the HTTP API responds.
+For an external `/api/status` check, login first and call port 8005 with the current access JWT as
+documented in the root README; never place a refresh token in the command.
 
 ## 4. Demo scenario order
 

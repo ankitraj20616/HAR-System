@@ -14,6 +14,10 @@ cat <<'EOF'
 
 Local prerequisites are ready.
 
+Required before starting:
+  Edit .env with your Supabase URL, publishable key, and a random 32+ character
+  AUTH_TICKET_SECRET. Follow core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md.
+
 Next:
   ./dev.sh up                 Start the stack and seed an empty database
   ./dev.sh logs               Follow all logs

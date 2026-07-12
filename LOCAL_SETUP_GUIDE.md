@@ -7,9 +7,10 @@ are run from the repository root. The fastest path is:
 ./dev.sh up
 ```
 
-The command checks Docker, creates `.env` from the safe example when needed, builds the images,
-waits for service health, and seeds an empty PostgreSQL database. Open <http://localhost:5173> to
-show the prototype.
+The command checks Docker and `.env`, builds the images, waits for service health, and seeds an empty
+PostgreSQL database. Supabase must be configured first; follow
+[`SUPABASE_SETUP.md`](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md). Open
+<http://localhost:5173> to show the prototype.
 
 ## 1. Prerequisites
 
@@ -20,6 +21,7 @@ show the prototype.
 - Linux webcam only for live camera input; it is not required for the seeded prototype
 - Python 3.11/3.12 only for host-side development and tests
 - Optional: Ollama for locally generated AI feedback
+- A Supabase project and network access for signup/login/session refresh
 
 Docker must be running and the current user must be allowed to use it. Verify the checkout once:
 
@@ -62,23 +64,24 @@ dashboard proxying, then stops it. Set `SMOKE_KEEP_RUNNING=true` to leave it run
 | Compose service | Host address | Responsibility |
 |---|---|---|
 | `dashboard` | <http://localhost:5173> | Caregiver UI, alerts, timeline, trends, feedback |
-| `fusion-service` | <http://localhost:8001> / [API docs](http://localhost:8001/docs) | Authoritative fused activity, events, REST/WebSocket |
-| `feedback-service` | <http://localhost:8002> / [API docs](http://localhost:8002/docs) | Safe feedback and summaries |
+| `auth-service` | <http://localhost:8005> / [API docs](http://localhost:8005/docs) | Public JWT/RBAC gateway |
+| `fusion-service` | Docker-internal `fusion-service:8001` | Authoritative fused activity and events |
+| `feedback-service` | Docker-internal `feedback-service:8002` | Safe feedback and summaries |
 | `sensor-service` | <http://localhost:8003> / [API docs](http://localhost:8003/docs) | Sensor windows and activity prediction |
 | `video-service` | <http://localhost:8004> / [API docs](http://localhost:8004/docs) | Pose-only video activity prediction |
 | `mosquitto` | `localhost:1883` | MQTT broker between services |
 | `postgres` | `localhost:5432` | Timeline, events, and feedback persistence |
 | `simulator` | no HTTP port | Continuous deterministic wearable-data demo |
 
-The dashboard proxies `/api/*` and WebSockets to backend containers. Browser-side API secrets are
-not needed.
+The dashboard proxies `/api/*` and WebSockets to Auth Service. Fusion/Feedback are not host-published.
+The browser receives only the Supabase publishable key; backend secrets never enter the React build.
 
 ## 4. Environment configuration
 
 `.env.example` is the complete, documented template. `./dev.sh setup` copies it to `.env` only when
 `.env` does not already exist. Never commit `.env` or real credentials.
 
-For the default local prototype, every required value is already provided. Important groups are:
+Replace the Supabase/ticket placeholders before `./dev.sh up`. Important groups are:
 
 | Variables | Where the value comes from |
 |---|---|
@@ -89,6 +92,9 @@ For the default local prototype, every required value is already provided. Impor
 | `VIDEO_DEVICE`, `VIDEO_GID` | Linux device path from `ls /dev/video*` and group ID from `getent group video` |
 | `OLLAMA_HOST`, `LLM_MODEL` | Local Ollama installation and a model shown by `ollama list` |
 | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | Not used by the current Ollama adapter; leave blank |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Your Supabase project; publishable key is browser-safe |
+| `SUPABASE_SERVICE_ROLE_KEY` | Optional server-only key required for admin role changes |
+| `AUTH_TICKET_SECRET` | Random 32+ character backend-only WebSocket signing secret |
 
 Do not search for or invent cloud API keys. If a future adapter requires one, obtain it only from
 your own account in that provider's official developer console, restrict its permissions/budget,

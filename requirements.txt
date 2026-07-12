@@ -1,10 +1,12 @@
 ai-edge-litert==2.1.6
 fastapi==0.115.12
+httpx==0.28.1
 mediapipe==0.10.21
 opencv-contrib-python==4.11.0.86
 paho-mqtt==2.1.0
 psycopg[binary]==3.2.9
 pydantic==2.11.5
 pydantic-settings==2.9.1
+PyJWT[crypto]==2.10.1
 SQLAlchemy==2.0.41
 uvicorn[standard]==0.34.2
