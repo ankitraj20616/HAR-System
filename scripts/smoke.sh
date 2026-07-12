@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+source "$project_root/scripts/common.sh"
+ensure_local_env
+require_auth_env
 
 compose=(docker compose)
 if ! "${compose[@]}" version >/dev/null 2>&1; then
@@ -24,7 +27,7 @@ trap cleanup EXIT
 echo "Validating Compose configuration..."
 "${compose[@]}" config --quiet
 
-echo "Building and starting the Milestone 5 demo stack (including simulator)..."
+echo "Building and starting the secured Milestone 6 demo stack (including simulator)..."
 up_args=(up --detach --wait --wait-timeout "${SMOKE_TIMEOUT_SECONDS:-180}")
 if [[ "${SMOKE_SKIP_BUILD:-false}" == "true" ]]; then
   up_args+=(--no-build)
@@ -35,8 +38,7 @@ fi
 
 echo "Checking backend health endpoints..."
 for port in \
-  "${FUSION_SERVICE_PORT:-8001}" \
-  "${FEEDBACK_SERVICE_PORT:-8002}" \
+  "${AUTH_SERVICE_PORT:-8005}" \
   "${SENSOR_SERVICE_PORT:-8003}" \
   "${VIDEO_SERVICE_PORT:-8004}"; do
   curl --fail --silent --show-error "http://localhost:${port}/health" >/dev/null
@@ -44,21 +46,11 @@ done
 curl --fail --silent --show-error "http://localhost:${DASHBOARD_PORT:-5173}/health" >/dev/null
 
 echo "Waiting for the built-in simulator to reach Fusion..."
-python_bin="${PYTHON:-python3}"
-if ! command -v "$python_bin" >/dev/null 2>&1; then
-  echo "Python 3 is required for the Fusion status check (set PYTHON to its path)." >&2
-  exit 1
-fi
-FUSION_SERVICE_PORT="${FUSION_SERVICE_PORT:-8001}" "$python_bin" - <<'PY'
-import json
-import os
-import time
-import urllib.request
-
+"${compose[@]}" exec -T fusion-service python - <<'PY'
+import json, time, urllib.request
 deadline = time.monotonic() + 20
-url = f"http://localhost:{os.environ['FUSION_SERVICE_PORT']}/api/status"
 while time.monotonic() < deadline:
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen("http://localhost:8001/api/status", timeout=2) as response:
         status = json.load(response)
     if status["modality_health"]["sensor"]["status"] == "online":
         break
@@ -116,8 +108,9 @@ SQL
 
 echo "Checking dashboard API routing..."
 curl --fail --silent --show-error \
-  "http://localhost:${DASHBOARD_PORT:-5173}/api/status" >/dev/null
-curl --fail --silent --show-error \
-  "http://localhost:${DASHBOARD_PORT:-5173}/api/feedback/latest" >/dev/null
+  "http://localhost:${DASHBOARD_PORT:-5173}/api/auth/config" >/dev/null
+status_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "http://localhost:${DASHBOARD_PORT:-5173}/api/status")"
+test "$status_code" = 401
 
-echo "Milestone 5 demo stack smoke test passed."
+echo "Milestone 6 secured demo stack smoke test passed."

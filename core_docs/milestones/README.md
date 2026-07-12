@@ -1,6 +1,6 @@
 # Project Milestones
 
-This folder divides the HAR project into five clear milestones. Each milestone should leave the
+This folder divides the HAR project into six clear milestones. Each milestone should leave the
 repository in a working and testable state.
 
 The project is intentionally software-only:
@@ -20,6 +20,7 @@ The project is intentionally software-only:
 | 3. Fusion, safety, and persistence | Implemented | One activity stream, fall/inactivity events, saved history, REST and WebSocket APIs |
 | 4. Dashboard and feedback | Implemented | Caregiver dashboard, alert UI, safe GenAI feedback, summaries |
 | 5. Verification and release | Implemented; release evidence pending | Metrics, hardened one-command demo, release audits, runbooks and evidence templates |
+| 6. Authentication and RBAC | Implemented; Supabase project setup pending | Supabase login/session, FastAPI JWT gateway, roles, protected REST/WebSockets |
 
 “Implemented” means the code and automated tests exist in the development history. A milestone is
 fully accepted only after its exit checklist also passes in the intended demo environment.
@@ -212,6 +213,36 @@ target laptop; the repository intentionally records them as `NOT RUN` rather tha
 See [`milestone-5-verification-release/IMPLEMENTATION.md`](milestone-5-verification-release/IMPLEMENTATION.md)
 and [`milestone-5-verification-release/RUNBOOK.md`](milestone-5-verification-release/RUNBOOK.md).
 
+## Milestone 6: Authentication middleware and RBAC
+
+Folder: [`milestone-6-auth-rbac`](milestone-6-auth-rbac/)
+
+### Goal
+
+Dashboard data ko public access se protect karna. Supabase user login/signup/session issue karta hai;
+FastAPI Auth Service har REST request ka access JWT verify karke role permission apply karti hai.
+
+### Implemented work
+
+- Supabase `pending`, `caregiver`, `doctor`, and `admin` role schema;
+- new-user pending-role trigger and custom access-token hook;
+- asymmetric JWKS JWT verification;
+- default-deny REST role matrix and admin role API;
+- browser-safe one-time WebSocket tickets;
+- React login, signup, pending approval, refresh, logout, and admin role form;
+- Auth Service as the only public Fusion/Feedback gateway in secured Compose mode;
+- setup guide, runbook, security checklist, tests, and easy Hinglish explanation.
+
+### Main requirements
+
+`FR-A1`–`FR-A8` and `NFR-12`.
+
+### Completion idea
+
+New signup monitoring data nahi dekh sakta; approved roles sirf allowed actions karte hain; fake,
+expired, wrong-project, and wrong-role requests fail closed; secrets frontend ya logs mein nahi aate.
+Supabase dashboard migration/hook/email settings target project par configure karna external setup step hai.
+
 ## Requirement code guide
 
 The short requirement IDs come from the approved project specification:
@@ -223,6 +254,7 @@ The short requirement IDs come from the approved project specification:
 | `FR-F` | Fusion Service |
 | `FR-G` | GenAI Feedback Service |
 | `FR-D` | Dashboard |
+| `FR-A` | Authentication and role-based access control |
 | `FR-X` | Cross-cutting platform requirement |
 | `NFR` | Non-functional requirement such as privacy, reliability, or latency |
 

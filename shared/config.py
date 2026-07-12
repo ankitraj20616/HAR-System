@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     video_port: int = Field(default=8004, ge=1, le=65535)
     fusion_port: int = Field(default=8001, ge=1, le=65535)
     feedback_port: int = Field(default=8002, ge=1, le=65535)
+    auth_port: int = Field(default=8005, ge=1, le=65535)
 
     @field_validator("service_name", "service_version", "mqtt_host")
     @classmethod

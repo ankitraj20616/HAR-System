@@ -7,7 +7,7 @@
 | **Type** | College Final-Year Project |
 | **Team** | Ankit Raj, Suman Kumar Jha, Tanzeem Shahzada, Aman Kumar |
 | **Document** | Technical Design Document (how it is built) |
-| **Version** | 1.0 |
+| **Version** | 1.1 (authentication and RBAC) |
 | **Companion doc** | `core_docs/FUNCTIONAL_SPEC.md` (what it does) |
 
 > This document is the engineering source of truth. It specifies the architecture, technology stack,
@@ -21,7 +21,7 @@
 ### 1.1 Design principles
 - **Software-only Model.** The system operates completely in software on standard computer hardware, utilizing camera/webcam video feeds for pose estimation and activity recognition, and simulated sensor inputs (with no active physical IoT hardware deployment or physical wiring).
 - **No model training.** All AI components use pre-trained models for inference. The project supports both local open-source models (for privacy and offline usage) and cloud-based closed-source APIs (for high accuracy and reduced local compute requirements).
-- **Microservices Architecture.** Five independent services are loosely coupled via an **MQTT** pub/sub broker, enabling modular development, deployment, and fault isolation.
+- **Microservices Architecture.** Six independent services are coupled through MQTT and a protected HTTP gateway, enabling modular development, deployment, and fault isolation.
 - **Privacy by construction.** The video service processes webcam or video files locally and emits only numeric body landmarks; raw video frames are immediately discarded and never persisted.
 - **Robust Persistence.** PostgreSQL is used as the centralized relational database for storing activity timelines, alerts, events, and feedback.
 
@@ -38,11 +38,13 @@ flowchart TD
       SEN[Sensor Service\nfeatures + pre-trained HF HAR model]
       FUS[Fusion / HAR Service\nconfidence-weighted voting + fall logic]
       FB[Feedback Service\nOllama local LLM]
+      AUTH[Auth Service\nSupabase JWT + RBAC gateway]
     end
 
     BROKER{{Mosquitto MQTT Broker}}
     DB[(PostgreSQL\ntimeline + events)]
     DASH[Dashboard\nReact + Vite + Recharts]
+    SUPA[(Supabase Auth\nusers + roles + JWKS)]
 
     CAM --> VID
     SIM -->|MQTT sensor/raw| BROKER
@@ -54,9 +56,12 @@ flowchart TD
     FUS --> DB
     BROKER --> FB
     FB --> DB
-    FB -->|REST + WebSocket| DASH
-    FUS -->|REST + WebSocket| DASH
-    DB --> DASH
+    DASH -->|signup/login/refresh| SUPA
+    SUPA -->|access JWT + refresh token| DASH
+    DASH -->|Bearer JWT / WS ticket| AUTH
+    AUTH -->|JWKS + admin role updates| SUPA
+    AUTH -->|authorized internal REST/WS| FB
+    AUTH -->|authorized internal REST/WS| FUS
 ```
 
 ### 1.3 Runtime data flow (summary)
@@ -71,7 +76,8 @@ flowchart TD
 5. **Feedback Service** subscribes to events + periodically reads the timeline → prompts the
    **LLM (local Ollama Llama/Qwen or cloud Gemini/GPT/Claude APIs)** → produces structured feedback/alerts/summaries → stores them in **PostgreSQL** and pushes to the
    dashboard.
-6. **Dashboard** shows everything live via **WebSocket**, and reads history via **REST** endpoints backed by PostgreSQL.
+6. **Dashboard** logs in with Supabase, sends the access JWT to Auth Service, and keeps refresh tokens inside the Supabase client session flow.
+7. **Auth Service** verifies signature/claims locally with JWKS, checks RBAC, then forwards allowed REST/WebSocket traffic to Fusion or Feedback.
 
 ---
 
@@ -81,6 +87,8 @@ flowchart TD
 |---|---|---|---|
 | Language (backend) | **Python 3.11+** | All services & simulator | PSF |
 | Web framework | **FastAPI** + **Uvicorn** | REST + WebSocket endpoints per service | MIT / BSD |
+| Authentication | **Supabase Auth** + asymmetric JWKS | Signup/login/session issuance and signed identity | Open-source / hosted free tier |
+| JWT verification | **PyJWT + cryptography** | Local signature and standard-claim checks | MIT / Apache/BSD |
 | Pose estimation (Open) | **MediaPipe Pose / YOLOv8 Pose / YOLOv11 Pose** | Pre-trained body-landmark detection (video) | Apache-2.0 / AGPL-3.0 |
 | Pose estimation (Closed) | **Google Cloud Video Intelligence / Azure Vision API** | Cloud-based pose / activity analysis APIs | Paid Cloud Billing |
 | Vision I/O | **OpenCV (opencv-python)** | Webcam capture, frame handling | Apache-2.0 |
@@ -111,7 +119,7 @@ flowchart TD
 
 ## 3. Per-Service Design
 
-Common conventions: every service is a small FastAPI app; subscribes/publishes via paho-mqtt; reads
+Common conventions: every backend service is a small FastAPI app; data services subscribe/publish via paho-mqtt; each reads
 config from environment variables / a shared config file (FR-X4); logs structured lines (NFR-10).
 
 ### 3.1 Sensor Service  *(implements FR-S1…FR-S6)*
@@ -212,8 +220,22 @@ config from environment variables / a shared config file (FR-X4); logs structure
   ```
 - **Data sources:** WebSocket channel for `activity`, `event`, `feedback`; REST for timeline/trends/
   history on load.
-- **Backend-for-frontend:** the Fusion and Feedback services expose the REST/WebSocket endpoints
-  consumed here (§4.3); a thin gateway may aggregate them (optional).
+- **Backend-for-frontend:** Fusion and Feedback endpoints are consumed only through the required
+  Auth Service gateway (§4.3).
+
+### 3.6 Auth Service *(implements FR-A1…FR-A8)*
+
+- **Responsibility:** public REST/WebSocket entry point, Supabase JWT verification, role enforcement,
+  safe role administration, and allowed-request forwarding.
+- **Input:** `Authorization: Bearer <access JWT>`; never accepts passwords or refresh tokens.
+- **Verification:** allow-listed asymmetric algorithm, JWKS signature, issuer, audience, expiry,
+  user/session IDs and `user_role` custom claim.
+- **Authorization:** explicit default-deny matrix. Missing/invalid identity is 401; valid identity
+  without permission is 403.
+- **WebSocket:** authenticated REST issues an HMAC-signed, one-time, target-bound ticket.
+- **Network:** Fusion/Feedback remain Compose-internal; only Auth Service port 8005 is published.
+- **Admin:** role upsert uses the backend-only Supabase service-role key and returns sanitized errors.
+- **Detailed design:** `core_docs/milestones/milestone-6-auth-rbac/TDD.md`.
 
 ---
 
@@ -276,14 +298,17 @@ config from environment variables / a shared config file (FR-X4); logs structure
 ### 4.3 REST + WebSocket API (consumed by dashboard)
 | Method | Path | Service | Purpose |
 |---|---|---|---|
-| `GET` | `/api/status` | Fusion/gateway | Current activity + modality/service health (FR-D1, FR-D6) |
+| `GET` | `/api/auth/me` | Auth gateway | Verified user ID, email and role |
+| `POST` | `/api/auth/ws-ticket` | Auth gateway | One-time Fusion/Feedback WebSocket ticket |
+| `PUT` | `/api/admin/users/{id}/role` | Auth gateway | Admin-only role assignment |
+| `GET` | `/api/status` | Auth → Fusion | Current activity + modality/service health (FR-D1, FR-D6) |
 | `GET` | `/api/timeline?from=&to=` | Fusion/gateway | Activity history for the range (FR-D3) |
 | `GET` | `/api/trends?period=` | Fusion/gateway | Aggregated per-activity time / over-time (FR-D4) |
 | `GET` | `/api/events?from=&to=` | Fusion/gateway | Event/alert log (FR-D2, FR-D7) |
 | `POST` | `/api/events/{id}/ack` | Fusion/gateway | Acknowledge an alert (FR-D7) |
-| `GET` | `/api/feedback/latest` | Feedback | Latest GenAI feedback (FR-D5) |
-| `POST` | `/api/feedback/generate` | Feedback | On-demand feedback/summary (FR-G1, FR-G3) |
-| `WS` | `/ws` | Fusion + Feedback | Live stream: `activity`, `event`, `feedback` messages |
+| `GET` | `/api/feedback/latest` | Auth → Feedback | Latest GenAI feedback (FR-D5) |
+| `POST` | `/api/feedback/generate` | Auth → Feedback | On-demand feedback/summary (FR-G1, FR-G3) |
+| `WS` | `/ws`, `/feedback-ws` | Auth → internal service | Ticket-protected live streams |
 
 **WebSocket event envelope**
 ```json
@@ -371,10 +396,11 @@ HAR-System/
 │   │   ├── fusion.py         # confidence-weighted voting + smoothing
 │   │   ├── falldetect.py     # fall + abnormal/inactivity logic
 │   │   └── config.py
-│   └── feedback_service/
-│       ├── app.py            # REST/WS + MQTT subscribe
-│       ├── llm.py            # Ollama client + prompt templates
-│       └── config.py
+│   ├── feedback_service/
+│   │   ├── app.py            # REST/WS + MQTT subscribe
+│   │   ├── llm.py            # Ollama client + prompt templates
+│   │   └── config.py
+│   └── auth_service/         # Supabase JWT verification + RBAC + protected proxy
 ├── simulator/
 │   ├── replay.py            # streams a dataset over MQTT (har/sensor/raw)
 │   └── datasets/            # loaders + label mapping
@@ -421,6 +447,9 @@ All tunables are environment variables (documented in `.env.example`), satisfyin
 | `GEMINI_API_KEY` | *(optional)* | feedback | Google Gemini API key (required if provider is `gemini`). |
 | `OPENAI_API_KEY` | *(optional)* | feedback | OpenAI API key (required if provider is `openai`). |
 | `DATASET` | `uci-har` | simulator | Dataset directory to stream simulated IMU windows. |
+| `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` | *(required)* | auth, dashboard | Project URL and browser-safe client key. |
+| `SUPABASE_SERVICE_ROLE_KEY` | *(server secret)* | auth | Admin role updates only; never exposed to React. |
+| `AUTH_TICKET_SECRET` | *(32+ random chars)* | auth | Signs short-lived WebSocket tickets. |
 
 ---
 
@@ -498,7 +527,7 @@ Fusion, plus fall `precision`/`recall` and average latency — directly populati
 ollama pull llama3.2:3b
 python simulator/datasets/download.py --dataset uci-har   # fetches into data/
 
-# 2) start everything (Mosquitto + PostgreSQL + 4 services + dashboard)
+# 2) after Supabase setup and .env configuration, start everything
 docker-compose up --build
 
 # 3) start the sensor replay (no hardware needed, software simulator only)
@@ -508,15 +537,16 @@ python simulator/replay.py --dataset uci-har --realtime
 #    http://localhost:5173   (Vite dev)  or the compose-exposed port
 ```
 `docker-compose` brings up: `db` (PostgreSQL), `mosquitto`, `sensor_service`, `video_service`, `fusion_service`,
-`feedback_service`, `dashboard`. The video service uses the host webcam (device passthrough).
+`feedback_service`, `auth_service`, `dashboard`. The video service uses the host webcam (device passthrough).
 
 ### 10.3 Ports (indicative)
 | Service | Port | Description |
 |---|---|---|
 | PostgreSQL (DB) | 5432 | Primary database storage |
 | Mosquitto (MQTT) | 1883 | Message broker |
-| Fusion API/WS | 8001 | Fused activity & alerts API |
-| Feedback API/WS | 8002 | GenAI text generation API |
+| Fusion internal API/WS | 8001 | Fused activity & alerts; not host-published in secured Compose |
+| Feedback internal API/WS | 8002 | GenAI text; not host-published in secured Compose |
+| Auth API/WS | 8005 | Public JWT/RBAC gateway; Fusion/Feedback are internal in Compose |
 | Ollama | 11434 | Local LLM host (optional) |
 | Dashboard | 5173 | User interface dashboard |
 
@@ -539,6 +569,7 @@ to parallelize:
 | 8 | Dashboard | **React + Vite** dashboard (live + history + trends). | Dev D |
 | 9 | Feedback engine | **Feedback Service** with **LLM Integration (Ollama / Cloud APIs)**. | Dev B/D |
 | 10 | Testing & report | **Metrics harness**, demo checklist (FSD §11), PPT/report. | All |
+| 11 | Authentication & RBAC | **Supabase Auth + FastAPI gateway + role matrix + protected WebSockets**. | All |
 
 ---
 
@@ -558,6 +589,8 @@ The project focuses strictly on a **software-only model** deployment. For teams 
 | Time-sync drift between modalities. | Timestamp every message; align in fusion buffer with tolerance window. |
 | False fall alarms. | Require both modalities for high-confidence fall; hysteresis smoothing. |
 | Docker webcam passthrough issues. | Document a non-Docker run mode for the video service as fallback. |
+| Supabase unavailable during login/refresh. | Verify JWTs locally; show a clear auth error; never bypass authentication. |
+| Service-role key leaked. | Backend-only env, no `VITE_` prefix, secret scan, rotation and role-audit review. |
 
 ---
 
@@ -568,6 +601,8 @@ The project focuses strictly on a **software-only model** deployment. For teams 
 - [ ] If using cloud-based closed-source models (Gemini, GPT, Azure), verify active internet connection and valid API keys.
 - [ ] No custom model training is performed — only pre-trained inference models (e.g., MediaPipe/YOLO Pose, HF models, local Ollama or cloud GenAI).
 - [ ] Raw video is never stored or transmitted (NFR-3, FR-V5).
+- [ ] Supabase service-role key is absent from frontend source/build output and logs.
+- [ ] Protected REST/WebSocket routes pass JWT, 401/403 and RBAC tests.
 
 ---
 

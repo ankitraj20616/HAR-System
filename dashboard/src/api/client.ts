@@ -1,4 +1,6 @@
 import type { EventsResponse, Feedback, RangeKey, SystemStatus, TimelineResponse, TrendsResponse, EventRecord } from '../types';
+import type { AppRole, AuthenticatedUser } from '../types';
+import { getAccessToken, refreshAccessToken } from '../auth/session';
 
 const API_TIMEOUT_MS = 8_000;
 const fusionBase = String(import.meta.env.VITE_FUSION_API_BASE || '').replace(/\/$/, '');
@@ -7,12 +9,14 @@ export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); this.name = 'ApiError'; }
 }
 
-async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, retried = false): Promise<T> {
   const timeout = new AbortController();
   const timer = window.setTimeout(() => timeout.abort('timeout'), API_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   try {
-    const response = await fetch(path, { ...init, signal: combined, headers: { 'Content-Type': 'application/json', ...init.headers } });
+    const token = getAccessToken();
+    const response = await fetch(path, { ...init, signal: combined, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers } });
+    if (response.status === 401 && !retried && await refreshAccessToken()) return request<T>(path, init, signal, true);
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
       try { const body = await response.json() as { detail?: string }; detail = body.detail || detail; } catch { /* non-JSON error */ }
@@ -34,6 +38,9 @@ function bounds(period: RangeKey) {
 }
 
 export const api = {
+  me: (signal?: AbortSignal) => request<AuthenticatedUser>('/api/auth/me', {}, signal),
+  websocketTicket: (target: 'fusion' | 'feedback', signal?: AbortSignal) => request<{ ticket: string; expires_in: number }>('/api/auth/ws-ticket', { method: 'POST', body: JSON.stringify({ target }) }, signal),
+  updateRole: (userId: string, role: AppRole, signal?: AbortSignal) => request<{ user_id: string; role: AppRole }>(`/api/admin/users/${encodeURIComponent(userId)}/role`, { method: 'PUT', body: JSON.stringify({ role }) }, signal),
   status: (signal?: AbortSignal) => request<SystemStatus>(`${fusionBase}/api/status`, {}, signal),
   timeline: (period: RangeKey, signal?: AbortSignal) => request<TimelineResponse>(`${fusionBase}/api/timeline?${bounds(period)}`, {}, signal),
   events: (period: RangeKey, signal?: AbortSignal) => request<EventsResponse>(`${fusionBase}/api/events?${bounds(period)}`, {}, signal),

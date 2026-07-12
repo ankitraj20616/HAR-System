@@ -7,7 +7,7 @@
 | **Type** | College Final-Year Project |
 | **Team** | Ankit Raj, Suman Kumar Jha, Tanzeem Shahzada, Aman Kumar |
 | **Document** | Functional Specification Document (what the system does) |
-| **Version** | 1.0 |
+| **Version** | 1.1 (authentication and RBAC) |
 | **Status** | Approved for implementation |
 | **Companion doc** | `core_docs/TECHNICAL_DESIGN.md` (how it is built) |
 
@@ -34,7 +34,8 @@ by processing a **camera (webcam or CCTV) pose stream** (and optionally a **simu
 and then produces **personalized, plain-language health feedback and alerts** using a pre-trained **Generative-AI
 (GenAI) model** (either local open-source or cloud-based closed-source). Caregivers and doctors monitor everything through a
 **web dashboard** backed by a **PostgreSQL database**. The entire system is built **without physical hardware or custom model training**,
-utilizing off-the-shelf pre-trained models and a software-only pipeline.
+utilizing off-the-shelf pre-trained models and a software-only pipeline. Dashboard users authenticate
+with Supabase and receive only the actions allowed to their assigned role.
 
 ### 1.3 Intended audience
 - **Project team & evaluators** — to agree on scope and grade against acceptance criteria.
@@ -47,6 +48,8 @@ utilizing off-the-shelf pre-trained models and a software-only pipeline.
    inference (e.g., MediaPipe/YOLO Pose for video, HuggingFace classifiers for sensor data, and local Ollama or cloud-based LLMs for GenAI feedback).
 3. **Strictly Software-only deployment.** Runs on a standard computer. No physical IoT hardware is required or supported; the optional wearable sensor stream is produced by a **software simulator** that replays a public dataset.
 4. **Privacy-first.** Raw camera frames are **never stored**; only numeric body-landmark data leaves the video component.
+5. **Authenticated dashboard.** Supabase Auth needs network access for signup/login/session refresh;
+   an already-issued JWT is verified locally by the Auth Service while it remains valid.
 
 ### 1.5 Glossary
 | Term | Meaning |
@@ -66,6 +69,8 @@ utilizing off-the-shelf pre-trained models and a software-only pipeline.
 | **Microservice** | An independent service responsible for one part of the system. |
 | **Simulator** | Component that replays a recorded sensor dataset as if it were a live device. |
 | **F1 score** | Accuracy metric balancing precision and recall (0–1, higher is better). |
+| **JWT** | Short-lived signed access token proving a logged-in user's identity and role. |
+| **RBAC** | Role-Based Access Control using `pending`, `caregiver`, `doctor`, and `admin`. |
 
 ---
 
@@ -95,12 +100,14 @@ open-source, pre-trained technology?*
 | O4 | Generate **personalized, plain-language health feedback** and **alerts** using a local GenAI model. |
 | O5 | Present live status, history, trends, and alerts on a **web dashboard** for caregivers/doctors. |
 | O6 | Keep the whole system **open-source, free, privacy-preserving, and laptop-deployable**. |
+| O7 | Require verified login and least-privilege role permission before dashboard data is available. |
 
 ### 2.3 Success criteria (project-level)
 - Fusion model achieves a **higher activity F1 score** than either single modality on the demo dataset.
 - Fall detection achieves **high precision and recall** with very few false positives.
 - End-to-end latency is low enough to feel **real-time**.
-- A live demo runs end-to-end on one laptop with **no paid service and no custom-trained model**.
+- A live demo runs end-to-end on one laptop with **no paid service and no custom-trained model**;
+  Supabase network access is available for authentication.
 
 ---
 
@@ -115,6 +122,7 @@ open-source, pre-trained technology?*
 - A **web dashboard** showing live activity, timeline/history, trends, and alerts.
 - **Local persistence** of the activity timeline and events (so history and summaries work).
 - A **metrics harness** to measure F1 / fall precision-recall / latency for the report.
+- Supabase email/password authentication, session refresh, a FastAPI Auth Service, and RBAC.
 
 ### 3.2 Out of scope (explicitly)
 - **Procuring or wiring physical IoT hardware** (ESP32/MPU6050/heart-rate sensor). An optional
@@ -123,13 +131,14 @@ open-source, pre-trained technology?*
 - **Clinical/medical certification.** The system is an academic prototype and an assistive tool, not
   a diagnostic medical device.
 - **Multi-patient / multi-camera tracking, telemedicine, and mobile apps** — listed under Future Scope.
-- **Cloud hosting / paid infrastructure.**
+- **Paid infrastructure.** Supabase free-tier Auth is an explicit authentication dependency; HAR
+  recognition and feedback services remain locally hosted.
 
 ### 3.3 Assumptions
 - A laptop with a working **webcam** and **≥8 GB RAM** is available for the demo.
 - The laptop can run a **small local LLM** (3B-class) via Ollama on CPU (slower) or GPU (faster).
 - Internet is available **once** to download datasets, the pre-trained models, and the LLM weights;
-  after that the system runs **fully offline**.
+  after that recognition runs locally. Signup/login/token refresh need Supabase access.
 - A single patient is in frame for the camera modality during a demo.
 
 ### 3.4 Dependencies
@@ -141,7 +150,7 @@ open-source, pre-trained technology?*
 - **Generative AI / LLM Options (Personalized Feedback & Alerts):**
   - *Open-Source (Local):* Llama 3.2 (1B/3B), Qwen2.5 (1.5B/3B), Phi-3-mini (via Ollama)
   - *Closed-Source (API):* Google Gemini (Gemini 1.5 Flash/Pro), OpenAI GPT-4o/GPT-4o-mini, Anthropic Claude 3.5 Sonnet
-- **Backend & Middleware:** FastAPI, Uvicorn, Mosquitto (MQTT Broker), PostgreSQL (Primary Database), Docker, docker-compose, React + Vite (Frontend)
+- **Backend & Middleware:** FastAPI, Uvicorn, Mosquitto (MQTT Broker), PostgreSQL (Primary Database), Supabase Auth, Docker, docker-compose, React + Vite (Frontend)
 
 ---
 
@@ -203,7 +212,7 @@ The system classifies the patient's current activity into exactly one of:
 
 ## 6. Functional Requirements
 
-Requirements are grouped by the five microservices named in the architecture. Each requirement has
+Requirements are grouped by the six microservices named in the architecture. Each requirement has
 an ID, a description, a priority (**M**=Must, **S**=Should, **C**=Could), and **acceptance criteria**.
 
 ### 6.1 Sensor Service (FR-S)
@@ -260,7 +269,19 @@ an ID, a description, a priority (**M**=Must, **S**=Should, **C**=Could), and **
 | FR-D6 | S | Show a **system/health panel** (which services/modalities are online). | The dashboard indicates if video or sensor stream is offline. |
 | FR-D7 | C | Allow basic **acknowledgement** of an alert (mark as seen). | An acknowledged alert is visually distinguished from a new one. |
 
-### 6.6 Cross-cutting / platform (FR-X)
+### 6.6 Authentication and RBAC Service (FR-A)
+| ID | Pri | Requirement | Acceptance criteria |
+|---|---|---|---|
+| FR-A1 | M | Signup/login/logout through Supabase Auth. | Valid credentials create a session; invalid credentials do not reveal whether an account exists. |
+| FR-A2 | M | Send the access JWT on every protected REST request. | Gateway receives a Bearer access token; refresh token is never sent to HAR services. |
+| FR-A3 | M | Verify JWT signature, issuer, audience, expiry, user and session claims. | Fake, expired, malformed or wrong-project tokens return 401. |
+| FR-A4 | M | Apply default-deny RBAC to REST and live connections. | Valid but disallowed action returns 403. |
+| FR-A5 | M | Create every new user as `pending`. | Monitoring data remains blocked until an admin assigns a role. |
+| FR-A6 | M | Allow only admins to assign roles and audit every change. | Non-admin updates fail; accepted updates record actor/time/old/new role. |
+| FR-A7 | M | Authenticate browser WebSockets without placing JWTs in URLs. | One-time short-lived ticket is required for each live connection. |
+| FR-A8 | M | Keep Fusion and Feedback APIs behind the Auth Service. | Dashboard traffic cannot bypass JWT/RBAC through published backend ports. |
+
+### 6.7 Cross-cutting / platform (FR-X)
 | ID | Pri | Requirement | Acceptance criteria |
 |---|---|---|---|
 | FR-X1 | M | **Persist** the activity timeline and events locally so history/summaries survive restarts. | After restart, prior timeline/events are still visible. |
@@ -374,10 +395,11 @@ flowchart LR
 | NFR-5 | **Usability** | A non-technical caregiver can read current state & alerts without training. | Usability walkthrough: caregiver identifies state & a fall unaided. |
 | NFR-6 | **Portability / Deployability** | Runs on a standard laptop; one-command start. | `docker-compose up` (documented) brings up the full system. |
 | NFR-7 | **Cost / licensing** | Only free, open-source components and openly-licensed models. | Dependency audit shows no paid/closed component. |
-| NFR-8 | **Offline operation** | After initial downloads, runs without internet. | Full demo runs with networking disabled. |
+| NFR-8 | **Local processing / bounded cloud dependency** | HAR inference and stored history remain local; only authentication depends on Supabase. | With a still-valid JWT, gateway verification and HAR processing do not call Supabase per request. |
 | NFR-9 | **Maintainability** | Microservice isolation; config-driven thresholds. | Thresholds/models changeable via config, not code. |
 | NFR-10 | **Observability** | Each service logs its activity for debugging/demo. | Logs show inbound data, predictions, and events per service. |
 | NFR-11 | **Safety of AI output** | GenAI must not provide diagnoses; always disclaim. | Generated text includes disclaimer; no diagnostic claims. |
+| NFR-12 | **Access security** | Protected data uses verified JWTs and least privilege. | 401/403, role matrix, key rotation and secret-leak tests pass. |
 
 ---
 
@@ -396,9 +418,11 @@ flowchart LR
 ## 11. Acceptance & Demo Checklist
 
 The project is considered functionally complete when **all "Must" requirements pass** and the
-following live demo succeeds on a single laptop, fully offline:
+following live demo succeeds on a single laptop (with Supabase access for authentication):
 
-- [ ] One command starts all five services + simulator + dashboard.
+- [ ] One command starts all six services + simulator + dashboard.
+- [ ] Signup/login works; a new `pending` user cannot read monitoring data.
+- [ ] Caregiver/doctor/admin role permissions return expected 200/403 results.
 - [ ] Dashboard shows **live current activity** that changes as the person on webcam changes posture.
 - [ ] Simulator replay drives the **sensor modality**; both modalities are shown "online".
 - [ ] A **simulated/acted fall** raises exactly one **fall alert** on the dashboard within ~1–2 s.
@@ -422,6 +446,7 @@ following live demo succeeds on a single laptop, fully offline:
 | O4 GenAI personalized feedback | FR-G1–G6, FR-D5 |
 | O5 Dashboard for caregivers/doctors | FR-D1–D7, FR-X1 |
 | O6 Open-source / free / privacy / laptop | FR-V5, FR-X2–X4, NFR-3, NFR-6–NFR-8 |
+| O7 Authenticated least-privilege access | FR-A1–A8, NFR-12 |
 
 ---
 

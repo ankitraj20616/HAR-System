@@ -39,6 +39,7 @@ case "$action" in
     [[ $# -eq 0 ]] || die "Usage: ./dev.sh up"
     require_compose
     ensure_local_env
+    require_auth_env
     info "Starting PostgreSQL and MQTT prerequisites..."
     "${COMPOSE[@]}" config --quiet
     "${COMPOSE[@]}" up --detach --wait \
@@ -51,8 +52,7 @@ case "$action" in
 
 HAR prototype is ready:
   Dashboard:    http://localhost:5173
-  Fusion API:  http://localhost:8001/docs
-  Feedback API:http://localhost:8002/docs
+  Auth gateway: http://localhost:8005/docs
 
 Use './dev.sh logs' to follow logs and './dev.sh down' to stop.
 EOF
@@ -81,8 +81,7 @@ EOF
     "${COMPOSE[@]}" ps
     echo
     for endpoint in \
-      http://localhost:8001/health \
-      http://localhost:8002/health \
+      http://localhost:8005/health \
       http://localhost:8003/health \
       http://localhost:8004/health \
       http://localhost:5173/health; do

@@ -14,7 +14,7 @@ does not make a diagnosis, and it must not replace a caregiver or emergency serv
 
 ## What is available now
 
-Milestones 1 through 5 are implemented. Final target-laptop results remain `NOT RUN` until the
+Milestones 1 through 6 are implemented. Final target-laptop results remain `NOT RUN` until the
 release runbook is executed and its evidence is reviewed.
 
 | Area | Current state |
@@ -31,6 +31,7 @@ release runbook is executed and its evidence is reviewed.
 | Fixed-scenario metrics harness and machine/human-readable reports | Implemented |
 | Release audit, dependency pin validation, and CI release gates | Implemented |
 | Demo/operations runbook and privacy/offline/usability evidence package | Implemented; target-laptop evidence pending |
+| Supabase login/session, FastAPI auth gateway, RBAC, protected WebSockets | Implemented; Supabase project setup required |
 
 Open the caregiver dashboard at <http://localhost:5173> after starting the stack.
 
@@ -98,16 +99,16 @@ Docker.
 
 ## Quick start with Docker
 
-Start the complete stack from the repository root:
+First follow [the Supabase setup guide](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md)
+and create `.env` from `.env.example`. Then start the complete stack from the repository root:
 
 ```bash
 docker compose up --build --wait
 ```
 
-This starts Mosquitto, PostgreSQL, all four backend services, the dashboard, and a deterministic
-offline synthetic sensor simulator. No `.env` file or dataset download is required for this demo
-path; the repository includes safe local defaults. The synthetic cycle is not final evaluation
-evidence.
+This starts Mosquitto, PostgreSQL, five backend services, the dashboard, and a deterministic
+synthetic sensor simulator. Supabase Auth needs network access for signup/login/session refresh;
+HAR inference and persistence remain local. The synthetic cycle is not final evaluation evidence.
 
 Check that every container started:
 
@@ -167,8 +168,9 @@ provide the same Linux camera-device passthrough.
 | Component | Address | What it does |
 |---|---|---|
 | Caregiver dashboard | <http://localhost:5173> | Live state, alerts, history, trends, health, and feedback |
-| Fusion API | <http://localhost:8001> | Current activity, history, trends, events, acknowledgement, WebSocket |
-| Feedback API | <http://localhost:8002> | Structured feedback/summary generation and Feedback WebSocket |
+| Auth/RBAC API gateway | <http://localhost:8005> | Protected Fusion/Feedback REST and WebSocket entry point |
+| Fusion API | Docker-internal `fusion-service:8001` | Current activity, history, trends, events, acknowledgement |
+| Feedback API | Docker-internal `feedback-service:8002` | Structured feedback/summary generation |
 | Sensor API | <http://localhost:8003> | Sensor recognition and MQTT health |
 | Video API | <http://localhost:8004> | Webcam/pose recognition and health |
 | Mosquitto | `localhost:1883` | MQTT message broker |
@@ -177,7 +179,7 @@ provide the same Linux camera-device passthrough.
 Every backend has a health endpoint. For example:
 
 ```bash
-curl http://localhost:8001/health
+curl http://localhost:8005/health
 curl http://localhost:8003/health
 curl http://localhost:8004/health
 ```
@@ -187,10 +189,17 @@ dependency, model, camera, broker, or database needs attention.
 
 ## Try the Fusion API
 
+Protected calls use the short-lived access token returned by your own Supabase login. Do not paste a
+refresh token or service-role key here:
+
+```bash
+ACCESS_TOKEN='<current Supabase access token>'
+```
+
 ### Current status
 
 ```bash
-curl http://localhost:8001/api/status
+curl -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8005/api/status
 ```
 
 The response contains the displayed activity, confidence, last update, sensor/video online state,
@@ -201,7 +210,7 @@ and MQTT/database state.
 Use UTC timestamps with `Z` or `+00:00`:
 
 ```bash
-curl "http://localhost:8001/api/timeline?from=2026-07-10T00:00:00Z&to=2026-07-11T00:00:00Z&limit=100"
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8005/api/timeline?from=2026-07-10T00:00:00Z&to=2026-07-11T00:00:00Z&limit=100"
 ```
 
 Without `from` and `to`, the API returns the most recent 24-hour range. Results are ordered from
@@ -210,13 +219,13 @@ oldest to newest.
 ### Safety events
 
 ```bash
-curl "http://localhost:8001/api/events?from=2026-07-10T00:00:00Z&to=2026-07-11T00:00:00Z"
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8005/api/events?from=2026-07-10T00:00:00Z&to=2026-07-11T00:00:00Z"
 ```
 
 ### Acknowledge an event
 
 ```bash
-curl -X POST http://localhost:8001/api/events/1/ack
+curl -X POST -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8005/api/events/1/ack
 ```
 
 Acknowledgement is idempotent. Repeating it for the same event is safe. An unknown event ID returns
@@ -227,7 +236,7 @@ HTTP `404`.
 Supported periods are `1h`, `24h`, `7d`, and `30d`:
 
 ```bash
-curl "http://localhost:8001/api/trends?period=24h"
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8005/api/trends?period=24h"
 ```
 
 The response includes a count and bounded observed duration for every canonical activity label.
@@ -237,8 +246,11 @@ The response includes a count and bounded observed duration for every canonical 
 Connect a WebSocket client to:
 
 ```text
-ws://localhost:8001/ws
+ws://localhost:8005/ws?ticket=<one-time-ticket>
 ```
+
+Create the ticket first with authenticated `POST /api/auth/ws-ticket`; do not place the access JWT
+in the WebSocket URL. The React dashboard handles this automatically.
 
 Messages use a small typed envelope:
 
@@ -541,6 +553,7 @@ services/
   video_service/       Camera, landmarks, posture rules, MQTT
   fusion_service/      Alignment, fusion, safety, persistence, REST, WebSocket
   feedback_service/    Ollama adapter, digests, safety checks, fallback, REST/MQTT/WebSocket
+  auth_service/        Supabase JWT verification, RBAC, REST/WebSocket gateway
 shared/                Labels, schemas, topics, logging, database helpers and SQL
 simulator/             UCI HAR, WISDM and SisFall loaders plus replay engine
 tests/                 Unit, contract and integration tests
@@ -562,6 +575,11 @@ tests/                 Unit, contract and integration tests
 - [Milestone 5 implementation notes](core_docs/milestones/milestone-5-verification-release/IMPLEMENTATION.md)
 - [Milestone 5 demo and operations runbook](core_docs/milestones/milestone-5-verification-release/RUNBOOK.md)
 - [Milestone 5 evidence package](core_docs/milestones/milestone-5-verification-release/evidence/README.md)
+- [Milestone 6 functional scope](core_docs/milestones/milestone-6-auth-rbac/FSD.md)
+- [Milestone 6 technical design](core_docs/milestones/milestone-6-auth-rbac/TDD.md)
+- [Supabase setup guide](core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md)
+- [Auth/RBAC runbook](core_docs/milestones/milestone-6-auth-rbac/RUNBOOK.md)
+- [Auth/RBAC security checklist](core_docs/milestones/milestone-6-auth-rbac/SECURITY_CHECKLIST.md)
 - [Branching strategy](core_docs/BRANCHING_STRATEGY.md)
 
 ## Privacy and project limitations

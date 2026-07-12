@@ -23,3 +23,16 @@ main { width: min(1440px, 100%); margin: 0 auto; padding: clamp(1rem, 3vw, 2.25r
 @media (max-width: 850px) { nav { display: none; }.health-list { overflow-x: auto; }.fall-banner { grid-template-columns: auto 1fr; }.banner-actions { grid-column: 1 / -1; justify-content: flex-start; }.panel { grid-column: span 12; }.live-card { min-height: 150px; }.activity-symbol { width: 85px; height: 85px; font-size: 2.5rem; }.current-label { font-size: 2rem; } }
 @media (max-width: 560px) { .site-header { padding: .75rem 1rem; }.site-header > div > div p { display: none; }.status-bar { align-items: flex-start; flex-direction: column; }.health-list { width: 100%; }.panel-header { align-items: flex-start; flex-direction: column; }.range-select { width: 100%; justify-content: space-between; }.fall-banner { grid-template-columns: 1fr; }.alert-icon { width: 38px; height: 38px; }.alerts-list li { align-items: flex-start; flex-direction: column; }.button-group { width: 100%; }.button-group .button { flex: 1; }.sr-table { font-size: .8rem; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; } }
+/* Authentication and small signed-in/admin controls */
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; background: #eef4f7; }
+.auth-card { width: min(28rem, 100%); background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 1rem 3rem #1730421f; }
+.auth-card form, .admin-panel form { display: grid; gap: 1rem; margin-top: 1.25rem; }
+.auth-card label, .admin-panel label { display: grid; gap: .35rem; font-weight: 700; }
+.auth-card input, .admin-panel input, .admin-panel select { font: inherit; padding: .7rem; border: 1px solid #9fb2bd; border-radius: .4rem; }
+.auth-card button, .user-bar button, .admin-panel button { cursor: pointer; padding: .65rem 1rem; border: 0; border-radius: .4rem; background: #075985; color: white; font-weight: 700; }
+.text-button { margin-top: 1rem; background: transparent !important; color: #075985 !important; padding-left: 0 !important; }
+.error-text { color: #9f1239; } .notice-text { color: #166534; }
+.user-bar { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; padding: .55rem 1rem; background: #102f40; color: white; font-size: .9rem; }
+.admin-panel { padding: .75rem 1rem; background: #fff7d6; border-bottom: 1px solid #dec45d; }
+.admin-panel form { grid-template-columns: minmax(12rem, 2fr) minmax(8rem, 1fr) auto; align-items: end; }
+@media (max-width: 700px) { .user-bar { align-items: flex-start; flex-direction: column; } .admin-panel form { grid-template-columns: 1fr; } }

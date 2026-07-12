@@ -1,6 +1,8 @@
 export type Activity = 'WALKING' | 'SITTING' | 'STANDING' | 'LYING' | 'EXERCISING' | 'UNKNOWN';
 export type Severity = 'info' | 'warning' | 'critical';
 export type RangeKey = '1h' | '24h' | '7d' | '30d';
+export type AppRole = 'pending' | 'caregiver' | 'doctor' | 'admin';
+export interface AuthenticatedUser { user_id: string; email?: string | null; role: AppRole; session_id: string }
 
 export interface ModalityHealth { status: 'online' | 'offline'; last_update: string | null }
 export interface ComponentHealth { status: 'healthy' | 'degraded'; detail?: string | null }
