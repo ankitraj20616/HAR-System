@@ -18,12 +18,15 @@ from shared.topics import VIDEO_PREDICTION, policy_for
 class OpenCVCamera:
     """Small capture adapter with no recording or image-writing API."""
 
-    def __init__(self, camera_index: int, fps: float) -> None:
+    def __init__(self, camera_index: str, fps: float) -> None:
         try:
             import cv2
         except ImportError as exc:
             raise RuntimeError("opencv-python is required for webcam capture") from exc
-        self._capture = cv2.VideoCapture(camera_index)
+        
+        # If the string is just a number (e.g. "0"), parse it to int for local devices
+        target_index = int(camera_index) if camera_index.isdigit() else camera_index
+        self._capture = cv2.VideoCapture(target_index)
         self._capture.set(cv2.CAP_PROP_FPS, fps)
 
     @property

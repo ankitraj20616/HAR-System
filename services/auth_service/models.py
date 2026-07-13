@@ -13,7 +13,24 @@ class AuthenticatedUser(BaseModel):
     user_id: str
     email: str | None = None
     role: AppRole
-    session_id: str
+    session_id: str = ""
+
+
+class SignupRequest(BaseModel):
+    email: str = Field(min_length=5)
+    password: str = Field(min_length=8)
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: AuthenticatedUser
 
 
 class RoleUpdate(BaseModel):

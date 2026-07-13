@@ -11,7 +11,7 @@ SERVICE_TITLE = "HAR Video Service"
 class VideoSettings(Settings):
     """Video-specific settings, all overridable through environment variables."""
 
-    camera_index: int = Field(default=0, ge=0)
+    camera_index: str = Field(default="0")
     fps: float = Field(default=12.0, ge=1.0, le=60.0)
     min_visibility: float = Field(default=0.6, ge=0.0, le=1.0)
     horizontal_angle_threshold: float = Field(default=25.0, gt=0.0, lt=45.0)
