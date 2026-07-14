@@ -124,9 +124,9 @@ export default function LandingPage() {
                   icon: <ShieldCheck className="w-8 h-8 text-purple-500" />,
                   delay: 0.2
                 }
-              ].map((item, i) => (
+              ].map((item) => (
                 <motion.div
-                  key={i}
+                  key={item.role}
                   initial={{ opacity: 0, y: 30 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: "-50px" }}

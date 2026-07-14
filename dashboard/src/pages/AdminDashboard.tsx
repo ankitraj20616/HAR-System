@@ -20,7 +20,7 @@ export default function AdminDashboard() {
     try { 
       const result = await api.updateRole(String(form.get('user_id')), String(form.get('role')) as AppRole); 
       setMessage(`Role updated: ${result.user_id} → ${result.role}.`); 
-      api.users().then(setUsers);
+      api.users().then(setUsers).catch(() => {});
     }
     catch (reason) { 
       setMessage(reason instanceof Error ? reason.message : 'Role update failed.'); 

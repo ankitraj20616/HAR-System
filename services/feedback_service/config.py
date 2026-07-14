@@ -16,6 +16,7 @@ class FeedbackSettings(Settings):
     llm_provider: str = "ollama"
     llm_model: str = "llama3.2:3b"
     ollama_host: str = "http://localhost:11434"
+    gemini_api_key: str | None = None
     generation_timeout: float = Field(default=30.0, gt=0, le=300)
     feedback_interval: int = Field(default=900, ge=10, le=86_400)
     summary_schedule: str = "0 0 * * *"
@@ -31,8 +32,8 @@ class FeedbackSettings(Settings):
     @classmethod
     def provider_is_supported(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized != "ollama":
-            raise ValueError("LLM_PROVIDER currently supports the offline 'ollama' adapter")
+        if normalized not in ("ollama", "gemini"):
+            raise ValueError("LLM_PROVIDER currently supports 'ollama' or 'gemini'")
         return normalized
 
     @field_validator("llm_model", "ollama_host")

@@ -75,3 +75,14 @@ User feedback aur `design-taste-frontend` skill ke strict rules apply karke humn
 4. **Doctor Portal (Bento 2.0 UI) & Reload Bug Fix:**
    - **Reload Bug Fix:** Pehle jab background mein live websocket se activity update aati thi, toh portal poori screen refresh/reload kar deta tha jisse loading spinner bar bar aata tha. Ise fix kar diya gaya hai—ab data silently background mein fetch hota hai aur sirf naya data milne par UI quietly update hota hai bina blink kiye.
    - **Aesthetics (Bento 2.0):** User feedback ke baad brutalist UI hata kar pure Bento 2.0 design (clean white cards, large border radius `rounded-[2.5rem]`, external titles, and soft diffusion shadows) apply kiya gaya hai. Ab Doctor portal bhi Caregiver portal ki tarah clean, modern, aur soft-glass aesthetic follow karta hai.
+
+## 7. Code Quality & Stability Fixes (Bug Hunter)
+Haal hi mein code quality ko improve karne ke liye humne kuch hidden bugs fix kiye hain:
+
+1. **React Anti-Pattern Fix (`LandingPage.tsx`):**
+   - **Issue:** `Roles` grid render karte waqt `.map((item, i))` mein array index `i` ko as a key (`key={i}`) use kiya ja raha tha. Yeh React mein ek anti-pattern hai jo rendering issues cause kar sakta hai.
+   - **Solution:** Array index ki jagah unique identifier `key={item.role}` use kiya gaya.
+
+2. **Unhandled Promise Rejection Fix (`AdminDashboard.tsx`):**
+   - **Issue:** Role update karne ke baad `api.users().then(setUsers);` call hota tha par error handling (catch block) nahi tha. Network fail hone par app error throw karta tha.
+   - **Solution:** `.catch(() => {})` add karke silent fallback add kiya gaya taaki app crash na ho.

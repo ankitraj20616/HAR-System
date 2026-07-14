@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -15,13 +16,14 @@ from pydantic import ValidationError
 from services.feedback_service.config import FeedbackSettings
 from services.feedback_service.digest import build_digest, event_digest
 from services.feedback_service.engine import FeedbackEngine, GenerationResult
-from services.feedback_service.llm import FeedbackProvider, OllamaProvider
+from services.feedback_service.llm import FeedbackProvider, OllamaProvider, GeminiProvider
 from services.feedback_service.websocket import WebSocketHub
 from services.runtime import DependencyHealth
 from shared.db import ActivityRepository, EventRepository, FeedbackRepository, initialize_database
 from shared.schemas import Feedback, HAREvent, WebSocketEnvelope
 from shared.topics import EVENT, FEEDBACK, policy_for
 
+logger = logging.getLogger(__name__)
 
 async def run_blocking(function: Any, *args: Any, **kwargs: Any) -> Any:
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="feedback-io")
@@ -68,11 +70,21 @@ class FeedbackRuntime:
         connect_timeout: float = 1.0,
     ) -> None:
         self.settings = settings
+        if provider is None:
+            if settings.llm_provider == "gemini":
+                provider = GeminiProvider(
+                    settings.gemini_api_key or "",
+                    settings.llm_model,
+                    settings.generation_timeout
+                )
+            else:
+                provider = OllamaProvider(
+                    settings.ollama_host,
+                    settings.llm_model,
+                    settings.generation_timeout
+                )
         self.engine = FeedbackEngine(
-            provider
-            or OllamaProvider(
-                settings.ollama_host, settings.llm_model, settings.generation_timeout
-            ),
+            provider,
             fallback_enabled=settings.feedback_fallback_enabled,
         )
         self.activity_repository = activity_repository or ActivityRepository(settings.database_url)
@@ -193,6 +205,7 @@ class FeedbackRuntime:
                     await self._flush_pending()
                     await self.process_event(event)
                 except Exception:
+                    logger.exception("Failed to process HAREvent from queue")
                     self.counters["processing_failures"] += 1
                     self._database_healthy = False
             finally:
@@ -206,6 +219,7 @@ class FeedbackRuntime:
                 await self._flush_pending()
                 await self.generate_period("feedback", from_ts, to_ts)
             except Exception:
+                logger.exception("Failed to generate periodic feedback")
                 self.counters["processing_failures"] += 1
 
     async def _run_pending_retries(self) -> None:
@@ -231,6 +245,7 @@ class FeedbackRuntime:
                     request_id=f"daily:{scheduled.date().isoformat()}",
                 )
             except Exception:
+                logger.exception("Failed to generate scheduled summary")
                 self.counters["processing_failures"] += 1
 
     async def process_event(self, event: HAREvent) -> Feedback:
