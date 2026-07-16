@@ -26,7 +26,7 @@ export function LiveMonitor({ status, loading, error, stale, retry }: { status: 
                 animate={{ scale: 1, opacity: 1 }} 
                 className="relative z-10 w-32 h-32 rounded-full border-2 flex items-center justify-center mb-6 shadow-2xl backdrop-blur-md bg-white/5"
                 style={{ 
-                  borderColor: status.activity === 'LYING' ? '#ef4444' : status.activity === 'SITTING' ? '#3b82f6' : status.activity === 'WALKING' ? '#10b981' : '#64748b' 
+                  borderColor: status.activity === 'LYING' ? '#10b981' : status.activity === 'SITTING' ? '#3b82f6' : status.activity === 'WALKING' ? '#10b981' : '#64748b' 
                 }}
               >
                 <span className="text-5xl text-white font-bold tracking-tighter">
@@ -34,7 +34,7 @@ export function LiveMonitor({ status, loading, error, stale, retry }: { status: 
                 </span>
                 
                 {/* Ping animation wrapper */}
-                <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ backgroundColor: status.activity === 'LYING' ? '#ef4444' : status.activity === 'WALKING' ? '#10b981' : 'transparent' }} />
+                <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ backgroundColor: status.activity === 'LYING' ? '#10b981' : status.activity === 'WALKING' ? '#10b981' : 'transparent' }} />
               </motion.div>
 
               <div className="text-center relative z-10">

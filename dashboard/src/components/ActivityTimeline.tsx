@@ -60,7 +60,7 @@ export function ActivityTimeline({ items, range, loading, error, onRange, retry 
                 >
                   <span 
                     className="absolute -left-[9px] top-1.5 w-4 h-4 rounded-full border-2 border-white"
-                    style={{ backgroundColor: row.activity === 'LYING' ? '#ef4444' : row.activity === 'WALKING' ? '#10b981' : row.activity === 'SITTING' ? '#3b82f6' : '#94a3b8' }}
+                    style={{ backgroundColor: row.activity === 'LYING' ? '#10b981' : row.activity === 'WALKING' ? '#10b981' : row.activity === 'SITTING' ? '#3b82f6' : '#94a3b8' }}
                     aria-hidden="true"
                   />
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
