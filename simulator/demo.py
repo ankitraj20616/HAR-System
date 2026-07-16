@@ -19,8 +19,9 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from shared.logging import configure_logging
-from shared.schemas import SensorRaw, SensorWindow
-from shared.topics import SENSOR_RAW, policy_for
+from shared.schemas import SensorRaw, SensorWindow, VideoPrediction
+from shared.labels import Modality, ActivityLabel, Orientation
+from shared.topics import SENSOR_RAW, VIDEO_PREDICTION, policy_for
 
 
 class DemoSettings(BaseSettings):
@@ -32,6 +33,7 @@ class DemoSettings(BaseSettings):
     simulator_sampling_hz: float = Field(default=50.0, ge=10.0, le=200.0)
     simulator_chunk_seconds: float = Field(default=0.5, ge=0.1, le=5.0)
     simulator_scenario_seconds: float = Field(default=12.0, ge=2.0, le=300.0)
+    simulator_mock_video: bool = True
 
     @model_validator(mode="after")
     def chunk_contains_samples(self) -> DemoSettings:
@@ -122,7 +124,8 @@ def main() -> int:
     client.loop_start()
     started = time.monotonic()
     next_publish = started
-    policy = policy_for(SENSOR_RAW)
+    sensor_policy = policy_for(SENSOR_RAW)
+    video_policy = policy_for(VIDEO_PREDICTION)
     try:
         while not stopping.is_set():
             now = time.monotonic()
@@ -137,18 +140,37 @@ def main() -> int:
                 scenario_seconds=settings.simulator_scenario_seconds,
             )
             if connected.is_set():
+                now_ts = datetime.now(UTC)
                 payload = SensorRaw(
-                    ts=datetime.now(UTC),
+                    ts=now_ts,
                     device_id=settings.simulator_device_id,
                     sampling_hz=settings.simulator_sampling_hz,
                     window=SensorWindow(accel=accel, gyro=gyro),
                 )
                 client.publish(
-                    policy.topic,
+                    sensor_policy.topic,
                     payload.model_dump_json(),
-                    qos=policy.qos,
-                    retain=policy.retain,
+                    qos=sensor_policy.qos,
+                    retain=sensor_policy.retain,
                 )
+                
+                # Mock video prediction
+                if settings.simulator_mock_video:
+                    phase = int(elapsed / settings.simulator_scenario_seconds) % 3
+                    v_label = ActivityLabel.STANDING if phase == 0 else (ActivityLabel.WALKING if phase == 1 else ActivityLabel.EXERCISING)
+                    video_payload = VideoPrediction(
+                        ts=now_ts,
+                        modality=Modality.VIDEO,
+                        label=v_label,
+                        confidence=0.88,
+                        orientation=Orientation.VERTICAL,
+                    )
+                    client.publish(
+                        video_policy.topic,
+                        video_payload.model_dump_json(),
+                        qos=video_policy.qos,
+                        retain=video_policy.retain,
+                    )
             next_publish += settings.simulator_chunk_seconds
             if next_publish < now - settings.simulator_chunk_seconds:
                 next_publish = now + settings.simulator_chunk_seconds

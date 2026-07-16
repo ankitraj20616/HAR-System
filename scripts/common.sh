@@ -42,11 +42,10 @@ ensure_local_env() {
 }
 
 require_auth_env() {
-  [[ -f .env ]] || die "Run './dev.sh setup', then configure Supabase in .env."
-  if grep --quiet '^SUPABASE_URL=https://your-project-id\.supabase\.co$' .env \
-    || grep --quiet '^SUPABASE_PUBLISHABLE_KEY=sb_publishable_replace_me$' .env \
+  [[ -f .env ]] || die "Run './dev.sh setup', then configure auth in .env."
+  if grep --quiet '^JWT_SECRET=replace-with-at-least-32-random-characters$' .env \
     || grep --quiet '^AUTH_TICKET_SECRET=replace-with-at-least-32-random-characters$' .env; then
-    die "Configure SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, and AUTH_TICKET_SECRET in .env. See core_docs/milestones/milestone-6-auth-rbac/SUPABASE_SETUP.md."
+    die "Configure JWT_SECRET and AUTH_TICKET_SECRET in .env. Use: openssl rand -hex 32"
   fi
 }
 

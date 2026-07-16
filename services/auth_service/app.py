@@ -1,4 +1,4 @@
-"""FastAPI entry point for authentication, RBAC, and protected API forwarding."""
+"""FastAPI entry point for local authentication, RBAC, and protected API forwarding."""
 
 from __future__ import annotations
 
@@ -19,14 +19,22 @@ from fastapi import (
 from fastapi.responses import Response
 
 from services.auth_service.config import AuthSettings, get_service_settings
-from services.auth_service.jwt_verifier import (
+from services.auth_service.local_auth import (
+    AuthError,
     InvalidAccessToken,
-    SupabaseJWTVerifier,
-    TokenVerifier,
+    delete_user,
+    get_user_from_token,
+    list_users,
+    login,
+    signup,
+    update_user_role,
 )
 from services.auth_service.models import (
     AuthenticatedUser,
+    LoginRequest,
+    LoginResponse,
     RoleUpdate,
+    SignupRequest,
     WebSocketTicketRequest,
     WebSocketTicketResponse,
 )
@@ -38,11 +46,9 @@ from services.auth_service.tickets import InvalidTicket, TicketManager
 def create_app(
     settings: AuthSettings | None = None,
     *,
-    verifier: TokenVerifier | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     config = settings or get_service_settings()
-    token_verifier = verifier or SupabaseJWTVerifier(config)
     tickets = TicketManager(config.auth_ticket_secret, config.auth_ticket_ttl_seconds)
 
     @asynccontextmanager
@@ -74,11 +80,13 @@ def create_app(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         try:
-            return await token_verifier.verify(authorization[7:].strip())
+            return await get_user_from_token(authorization[7:].strip(), config)
         except InvalidAccessToken as exc:
             raise HTTPException(
                 status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}
             ) from exc
+
+    # ---- Public endpoints (no token required) ----
 
     @application.get("/health")
     async def health() -> dict[str, Any]:
@@ -86,17 +94,29 @@ def create_app(
             "service": "auth_service",
             "version": config.service_version,
             "status": "healthy",
-            "dependencies": {
-                "supabase_jwks": {"status": "healthy", "detail": "checked on protected requests"}
-            },
         }
 
-    @application.get("/api/auth/config")
-    async def public_config() -> dict[str, str]:
-        return {
-            "supabase_url": config.supabase_url,
-            "supabase_publishable_key": config.supabase_publishable_key,
-        }
+    @application.post("/api/auth/signup")
+    async def signup_endpoint(body: SignupRequest) -> dict[str, Any]:
+        try:
+            user = await signup(body.email, body.password, config)
+            return {"message": "Account created successfully. Please sign in.", "user_id": user["id"]}
+        except AuthError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.post("/api/auth/login", response_model=LoginResponse)
+    async def login_endpoint(body: LoginRequest) -> LoginResponse:
+        try:
+            user, token, expires_in = await login(body.email, body.password, config)
+            return LoginResponse(
+                access_token=token,
+                expires_in=expires_in,
+                user=user,
+            )
+        except AuthError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # ---- Protected endpoints (token required) ----
 
     @application.get("/api/auth/me", response_model=AuthenticatedUser)
     async def me(
@@ -115,6 +135,14 @@ def create_app(
             ticket=tickets.issue(user, body.target), expires_in=config.auth_ticket_ttl_seconds
         )
 
+    @application.get("/api/admin/users")
+    async def get_users(
+        user: AuthenticatedUser = Depends(current_user),  # noqa: B008
+    ) -> list[dict[str, Any]]:
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin role is required")
+        return await list_users(config)
+
     @application.put("/api/admin/users/{user_id}/role")
     async def update_role(
         user_id: str,
@@ -123,21 +151,24 @@ def create_app(
     ) -> dict[str, str]:
         if user.role != "admin":
             raise HTTPException(status_code=403, detail="Admin role is required")
-        if not config.supabase_service_role_key:
-            raise HTTPException(status_code=503, detail="Role administration is not configured")
-        response = await application.state.http.post(
-            f"{config.supabase_url}/rest/v1/user_roles",
-            headers={
-                "apikey": config.supabase_service_role_key,
-                "Authorization": f"Bearer {config.supabase_service_role_key}",
-                "Content-Type": "application/json",
-                "Prefer": "resolution=merge-duplicates,return=representation",
-            },
-            json={"user_id": user_id, "role": body.role, "updated_by": user.user_id},
-        )
-        if response.status_code >= 400:
-            raise HTTPException(status_code=502, detail="Supabase rejected the role update")
-        return {"user_id": user_id, "role": body.role}
+        try:
+            return await update_user_role(user_id, body.role, user.user_id, config)
+        except AuthError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.delete("/api/admin/users/{user_id}")
+    async def delete_user_route(
+        user_id: str,
+        user: AuthenticatedUser = Depends(current_user),  # noqa: B008
+    ) -> dict[str, str]:
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin role is required")
+        if user_id == user.user_id:
+            raise HTTPException(status_code=403, detail="You cannot delete your own account")
+        try:
+            return await delete_user(user_id, user.user_id, config)
+        except AuthError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @application.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def protected_proxy(

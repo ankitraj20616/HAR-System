@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from dataclasses import dataclass
 
@@ -17,6 +18,8 @@ class _Client:
     queue: asyncio.Queue[str]
     sender: asyncio.Task[None]
 
+
+logger = logging.getLogger(__name__)
 
 class WebSocketHub:
     """Fan out typed envelopes without allowing a slow client to block Fusion.
@@ -91,5 +94,6 @@ class WebSocketHub:
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.exception("WebSocket send loop failed for client %d", client_id)
             # Removal is intentionally local and does not affect other clients.
             self._clients.pop(client_id, None)
