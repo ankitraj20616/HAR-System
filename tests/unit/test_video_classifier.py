@@ -66,6 +66,32 @@ def lying_pose() -> PoseLandmarks:
     )
 
 
+def extrapolated_offscreen_pose() -> PoseLandmarks:
+    """A pose MediaPipe invents when most of the body is outside the frame.
+
+    These coordinates are recorded from a real DroidCam session in which the
+    person was standing but only their upper body was framed.  MediaPipe does
+    not report the unseen joints as missing; it extrapolates them far past the
+    left edge and still labels them 99% visible.  The invented skeleton is a
+    horizontal line, which reads as a torso angle of ~87 degrees.
+    """
+
+    return PoseLandmarks(
+        {
+            "left_shoulder": Landmark(0.12, 0.50, visibility=0.99),
+            "right_shoulder": Landmark(0.12, 0.64, visibility=0.99),
+            "left_hip": Landmark(-0.56, 0.50, visibility=0.99),
+            "right_hip": Landmark(-0.56, 0.64, visibility=0.99),
+            "left_knee": Landmark(-1.04, 0.51, visibility=0.99),
+            "right_knee": Landmark(-1.04, 0.65, visibility=0.99),
+            "left_ankle": Landmark(-1.53, 0.58, visibility=0.99),
+            "right_ankle": Landmark(-1.53, 0.72, visibility=0.99),
+            "left_wrist": Landmark(-0.30, 0.40, visibility=0.99),
+            "right_wrist": Landmark(-0.30, 0.70, visibility=0.99),
+        }
+    )
+
+
 def translate(pose: PoseLandmarks, dx: float = 0.0, dy: float = 0.0) -> PoseLandmarks:
     points = {}
     for name, point in pose.visible().items():
@@ -104,6 +130,43 @@ def test_missing_or_low_visibility_pose_is_unknown_with_low_confidence() -> None
         assert result.confidence <= 0.1
 
 
+def test_landmarks_extrapolated_outside_the_frame_are_not_trusted() -> None:
+    """High visibility is not evidence that a joint was actually seen.
+
+    Reporting a confident LYING for a standing person is worse than admitting
+    the pose is unusable: it is the false fall alarm this system exists to
+    avoid.
+    """
+
+    result = ActivityClassifier(VideoSettings()).classify(extrapolated_offscreen_pose())
+    assert result.label is ActivityLabel.UNKNOWN
+    assert result.confidence <= 0.1
+
+
+def test_a_joint_exactly_on_the_frame_edge_is_still_usable() -> None:
+    """Someone filling the frame is framed correctly, not unusable.
+
+    The edge itself is inside the image, so it must not be rejected: that is
+    the difference between a strict bound and a useless one.
+    """
+
+    pose = PoseLandmarks(
+        {
+            "left_shoulder": Landmark(0.4, 0.0),
+            "right_shoulder": Landmark(0.6, 0.0),
+            "left_hip": Landmark(0.4, 0.4),
+            "right_hip": Landmark(0.6, 0.4),
+            "left_knee": Landmark(0.4, 0.7),
+            "right_knee": Landmark(0.6, 0.7),
+            "left_ankle": Landmark(0.0, 1.0),
+            "right_ankle": Landmark(1.0, 1.0),
+            "left_wrist": Landmark(0.3, 0.3),
+            "right_wrist": Landmark(0.7, 0.3),
+        }
+    )
+    assert ActivityClassifier(VideoSettings()).classify(pose).label is not ActivityLabel.UNKNOWN
+
+
 def test_dynamic_activity_requires_history_then_detects_leg_alternation() -> None:
     settings = VideoSettings(
         motion_history_length=4,
@@ -137,14 +200,20 @@ def test_orientation_threshold_edge_is_horizontal() -> None:
     settings = VideoSettings(horizontal_angle_threshold=25)
     pose = standing_pose()
     points = pose.visible()
-    # Rotate the complete skeleton 65 degrees around the origin. The torso is
-    # exactly at the configured horizontal boundary (90 - 25 degrees).
+    # Rotate the complete skeleton 65 degrees about the middle of the frame, so
+    # the person stays inside the image the way a real one would. The torso then
+    # sits exactly at the configured horizontal boundary (90 - 25 degrees).
     radians = math.radians(65)
+    pivot = 0.5
     rotated = PoseLandmarks(
         {
             name: Landmark(
-                point.x * math.cos(radians) - point.y * math.sin(radians),
-                point.x * math.sin(radians) + point.y * math.cos(radians),
+                pivot
+                + (point.x - pivot) * math.cos(radians)
+                - (point.y - pivot) * math.sin(radians),
+                pivot
+                + (point.x - pivot) * math.sin(radians)
+                + (point.y - pivot) * math.cos(radians),
                 point.z,
                 point.visibility,
             )

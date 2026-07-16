@@ -22,6 +22,18 @@ class Landmark:
         if not 0.0 <= self.visibility <= 1.0:
             raise ValueError("landmark visibility must be between 0 and 1")
 
+    @property
+    def in_frame(self) -> bool:
+        """Whether this point actually lies inside the captured image.
+
+        Pose estimators extrapolate joints they cannot see rather than omitting
+        them, placing them outside the normalized 0-1 image box while still
+        reporting near-perfect visibility. Such a point is a guess, not an
+        observation, so geometry derived from it is meaningless.
+        """
+
+        return 0.0 <= self.x <= 1.0 and 0.0 <= self.y <= 1.0
+
 
 class PoseLandmarks:
     """Immutable, name-addressable numeric output from a pose estimator."""
@@ -31,7 +43,9 @@ class PoseLandmarks:
 
     def get(self, name: str, min_visibility: float = 0.0) -> Landmark | None:
         point = self._points.get(name)
-        return point if point is not None and point.visibility >= min_visibility else None
+        if point is None or not point.in_frame:
+            return None
+        return point if point.visibility >= min_visibility else None
 
     def require(
         self, names: Iterable[str], min_visibility: float = 0.0
@@ -45,7 +59,7 @@ class PoseLandmarks:
         return {
             name: point
             for name, point in self._points.items()
-            if point.visibility >= min_visibility
+            if point.in_frame and point.visibility >= min_visibility
         }
 
     def __len__(self) -> int:
