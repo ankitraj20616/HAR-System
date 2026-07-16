@@ -29,6 +29,7 @@ async def forward_http(
     request: Request,
     upstream: str,
     user: AuthenticatedUser,
+    timeout: float | None = None,
 ) -> Response:
     headers = {
         key: value
@@ -43,6 +44,7 @@ async def forward_http(
         params=request.query_params,
         content=await request.body(),
         headers=headers,
+        **({} if timeout is None else {"timeout": timeout}),
     )
     response_headers = {
         key: value

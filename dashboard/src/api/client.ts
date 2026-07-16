@@ -3,20 +3,23 @@ import type { AppRole, AuthenticatedUser } from '../types';
 import { getAccessToken, refreshAccessToken } from '../auth/session';
 
 const API_TIMEOUT_MS = 8_000;
+// Local CPU-only LLM generation runs far longer than a normal read. Must stay above
+// the auth gateway's own generation budget so the upstream error surfaces, not this one.
+const GENERATE_TIMEOUT_MS = 95_000;
 const fusionBase = String(import.meta.env.VITE_FUSION_API_BASE || '').replace(/\/$/, '');
 const feedbackBase = String(import.meta.env.VITE_FEEDBACK_API_BASE || '').replace(/\/$/, '');
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); this.name = 'ApiError'; }
 }
 
-async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, retried = false): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, retried = false, timeoutMs = API_TIMEOUT_MS): Promise<T> {
   const timeout = new AbortController();
-  const timer = window.setTimeout(() => timeout.abort('timeout'), API_TIMEOUT_MS);
+  const timer = window.setTimeout(() => timeout.abort('timeout'), timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   try {
     const token = getAccessToken();
     const response = await fetch(path, { ...init, signal: combined, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers } });
-    if (response.status === 401 && !retried && await refreshAccessToken()) return request<T>(path, init, signal, true);
+    if (response.status === 401 && !retried && await refreshAccessToken()) return request<T>(path, init, signal, true, timeoutMs);
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
       try { const body = await response.json() as { detail?: string }; detail = body.detail || detail; } catch { /* non-JSON error */ }
@@ -49,6 +52,6 @@ export const api = {
   activeCritical: (signal?: AbortSignal) => request<EventRecord | null>(`${fusionBase}/api/events/active-critical`, {}, signal),
   trends: (period: RangeKey, signal?: AbortSignal) => request<TrendsResponse>(`${fusionBase}/api/trends?period=${period}`, {}, signal),
   latestFeedback: (signal?: AbortSignal) => request<Feedback | null>(`${feedbackBase}/api/feedback/latest`, {}, signal),
-  generateFeedback: (mode: 'feedback' | 'summary', period: RangeKey, requestId: string, signal?: AbortSignal) => request<Feedback>(`${feedbackBase}/api/feedback/generate`, { method: 'POST', body: JSON.stringify({ mode, period, request_id: requestId }) }, signal),
+  generateFeedback: (mode: 'feedback' | 'summary', period: RangeKey, requestId: string, signal?: AbortSignal) => request<Feedback>(`${feedbackBase}/api/feedback/generate`, { method: 'POST', body: JSON.stringify({ mode, period, request_id: requestId }) }, signal, false, GENERATE_TIMEOUT_MS),
   acknowledge: (id: number, signal?: AbortSignal) => request<EventRecord>(`${fusionBase}/api/events/${id}/ack`, { method: 'POST' }, signal),
 };

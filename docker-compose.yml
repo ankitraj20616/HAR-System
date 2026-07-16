@@ -181,6 +181,37 @@ services:
       <<: *api-healthcheck
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8001/health',timeout=2)); assert data['status']=='healthy'"]
 
+  ollama:
+    image: ollama/ollama:0.6.8
+    restart: unless-stopped
+    # Serve immediately, then pull the model in the background. The healthcheck below only
+    # waits for the server, so a first-run model download never blocks `./dev.sh up`; the
+    # feedback service uses its safe fallback until the pull lands.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /bin/ollama serve &
+        serve_pid=$$!
+        until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+        /bin/ollama pull "${LLM_MODEL:-llama3.2:1b}" \
+          || echo "ollama: pull of ${LLM_MODEL:-llama3.2:1b} failed; feedback stays on safe fallback"
+        wait $$serve_pid
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - har-network
+
   feedback-service:
     <<: *backend
     command: ["uvicorn", "services.feedback_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
@@ -189,10 +220,10 @@ services:
       SERVICE_NAME: feedback-service
       SERVICE_PORT: 8002
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
-      LLM_MODEL: ${LLM_MODEL:-llama3.2:3b}
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-llama3.2:1b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GENERATION_TIMEOUT: ${GENERATION_TIMEOUT:-30}
+      GENERATION_TIMEOUT: ${GENERATION_TIMEOUT:-60}
       FEEDBACK_INTERVAL: ${FEEDBACK_INTERVAL:-900}
       SUMMARY_SCHEDULE: ${SUMMARY_SCHEDULE:-0 20 * * *}
       MAXIMUM_DIGEST_SIZE: ${MAXIMUM_DIGEST_SIZE:-12000}
@@ -210,6 +241,8 @@ services:
       mosquitto:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     healthcheck:
       <<: *api-healthcheck
@@ -232,6 +265,7 @@ services:
       AUTH_TICKET_SECRET: ${AUTH_TICKET_SECRET:?Set a random 32+ character AUTH_TICKET_SECRET in .env}
       AUTH_TICKET_TTL_SECONDS: ${AUTH_TICKET_TTL_SECONDS:-30}
       AUTH_UPSTREAM_TIMEOUT_SECONDS: ${AUTH_UPSTREAM_TIMEOUT_SECONDS:-10}
+      AUTH_GENERATE_TIMEOUT_SECONDS: ${AUTH_GENERATE_TIMEOUT_SECONDS:-90}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-}
       FUSION_INTERNAL_URL: http://fusion-service:8001
       FEEDBACK_INTERNAL_URL: http://feedback-service:8002
@@ -279,6 +313,7 @@ services:
 volumes:
   postgres-data:
   mosquitto-data:
+  ollama-data:
 
 networks:
   har-network:

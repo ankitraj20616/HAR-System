@@ -14,10 +14,10 @@ SERVICE_TITLE = "HAR Feedback Service"
 
 class FeedbackSettings(Settings):
     llm_provider: str = "ollama"
-    llm_model: str = "llama3.2:3b"
+    llm_model: str = "llama3.2:1b"
     ollama_host: str = "http://localhost:11434"
     gemini_api_key: str | None = None
-    generation_timeout: float = Field(default=30.0, gt=0, le=300)
+    generation_timeout: float = Field(default=60.0, gt=0, le=300)
     feedback_interval: int = Field(default=900, ge=10, le=86_400)
     summary_schedule: str = "0 0 * * *"
     maximum_digest_size: int = Field(default=12_000, ge=512, le=100_000)

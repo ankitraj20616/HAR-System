@@ -23,6 +23,9 @@ class AuthSettings(Settings):
     auth_ticket_secret: str = "local-import-only-change-in-env-0000"
     auth_ticket_ttl_seconds: int = Field(default=30, ge=5, le=120)
     auth_upstream_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # Local CPU-only LLM generation outlives the standard upstream budget, so the
+    # feedback generation route proxies with its own longer allowance.
+    auth_generate_timeout_seconds: float = Field(default=90.0, gt=0, le=300)
     # Bootstrap super administrators. Comma-separated emails granted the admin
     # role even before the database assigns one, so they can allocate roles to
     # everyone else. Backend-only; never expose with a VITE_ prefix.

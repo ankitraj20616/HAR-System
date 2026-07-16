@@ -178,13 +178,15 @@ def create_app(
     ) -> Response:
         if not is_allowed(user.role, request.method, request.url.path):
             raise HTTPException(status_code=403, detail="Your role does not allow this action")
-        upstream = (
-            config.feedback_internal_url
-            if request.url.path.startswith("/api/feedback/")
-            else config.fusion_internal_url
+        is_feedback = request.url.path.startswith("/api/feedback/")
+        upstream = config.feedback_internal_url if is_feedback else config.fusion_internal_url
+        timeout = (
+            config.auth_generate_timeout_seconds
+            if request.url.path == "/api/feedback/generate"
+            else None
         )
         try:
-            return await forward_http(application.state.http, request, upstream, user)
+            return await forward_http(application.state.http, request, upstream, user, timeout)
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=503, detail="Requested HAR service is unavailable"
