@@ -24,7 +24,9 @@ class VideoSettings(Settings):
     # grabber thread keeps only the newest frame. Local webcams do not need it.
     video_low_latency: bool = Field(default=True)
     capture_read_timeout: float = Field(default=5.0, ge=0.5, le=30.0)
-    reconnect_attempts: int = Field(default=5, ge=1, le=100)
+    # A safety monitor must outlive the camera: 0 retries forever at capped
+    # backoff, so a phone that reconnects hours later is picked back up.
+    reconnect_attempts: int = Field(default=0, ge=0, le=100)
     reconnect_initial_backoff: float = Field(default=0.25, ge=0.0, le=30.0)
     reconnect_max_backoff: float = Field(default=5.0, gt=0.0, le=60.0)
 

@@ -113,6 +113,7 @@ class VideoPipeline:
             label=result.label,
             confidence=result.confidence,
             orientation=result.orientation,
+            vertical_velocity=result.vertical_velocity,
         )
         self.publisher.publish(prediction)
         return prediction
@@ -147,7 +148,8 @@ class VideoPipeline:
                         extra={"event": "video_pipeline_retry", "attempt": attempts},
                     )
                     await self._close_resources()
-                    if attempts >= self.settings.reconnect_attempts:
+                    limit = self.settings.reconnect_attempts
+                    if limit and attempts >= limit:
                         logger.error(
                             "Video reconnect limit reached; API remains available",
                             extra={"event": "video_reconnect_exhausted"},

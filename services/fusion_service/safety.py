@@ -53,6 +53,7 @@ class FallDetector:
         fall_cooldown_seconds: float,
         fall_recovery_timeout_seconds: float,
         inactivity_motion_threshold: float = 0.05,
+        fall_velocity_threshold: float = 0.6,
     ) -> None:
         self.fall_accel_threshold = _positive("fall_accel_threshold", fall_accel_threshold)
         self.fall_correlation_ms = _positive(
@@ -66,6 +67,9 @@ class FallDetector:
         )
         self.recovery_motion_threshold = _positive(
             "inactivity_motion_threshold", inactivity_motion_threshold, allow_zero=True
+        )
+        self.fall_velocity_threshold = _positive(
+            "fall_velocity_threshold", fall_velocity_threshold
         )
 
         self._spikes: deque[SensorPrediction] = deque()
@@ -116,6 +120,11 @@ class FallDetector:
         else:
             match = self._nearest(prediction, list(self._spikes))
             if match is None:
+                # No wearable spike to lean on.  A body that arrived at
+                # horizontal fast enough is a fall on video evidence alone;
+                # settling onto a bed or chair never reaches this speed.
+                if prediction.vertical_velocity >= self.fall_velocity_threshold:
+                    return self._confirm(None, prediction)
                 return None
             sensor, video = match, prediction
         return self._confirm(sensor, video)
@@ -207,29 +216,45 @@ class FallDetector:
             ),
         )
 
-    def _confirm(self, sensor: SensorPrediction, video: VideoPrediction) -> HAREvent:
-        timestamp = max(sensor.ts, video.ts)
-        correlation_ms = abs((sensor.ts - video.ts).total_seconds()) * 1000.0
+    def _confirm(self, sensor: SensorPrediction | None, video: VideoPrediction) -> HAREvent:
+        timestamp = max(sensor.ts, video.ts) if sensor is not None else video.ts
         event = HAREvent(
             ts=timestamp,
             type=EventType.FALL,
             severity=EventSeverity.CRITICAL,
-            confidence=min(sensor.confidence, video.confidence),
+            confidence=(
+                min(sensor.confidence, video.confidence)
+                if sensor is not None
+                else video.confidence
+            ),
             evidence={
-                "rule": "motion_spike_and_horizontal",
-                "two_modality_confirmed": True,
-                "correlation_ms": correlation_ms,
-                "sensor": {
-                    "ts": _iso(sensor.ts),
-                    "label": str(sensor.label),
-                    "confidence": sensor.confidence,
-                    "motion_intensity": sensor.motion_intensity,
-                },
+                "rule": (
+                    "motion_spike_and_horizontal"
+                    if sensor is not None
+                    else "video_drop_and_horizontal"
+                ),
+                "two_modality_confirmed": sensor is not None,
+                "correlation_ms": (
+                    abs((sensor.ts - video.ts).total_seconds()) * 1000.0
+                    if sensor is not None
+                    else None
+                ),
+                "sensor": (
+                    {
+                        "ts": _iso(sensor.ts),
+                        "label": str(sensor.label),
+                        "confidence": sensor.confidence,
+                        "motion_intensity": sensor.motion_intensity,
+                    }
+                    if sensor is not None
+                    else None
+                ),
                 "video": {
                     "ts": _iso(video.ts),
                     "label": str(video.label),
                     "confidence": video.confidence,
                     "orientation": str(video.orientation),
+                    "vertical_velocity": video.vertical_velocity,
                 },
                 "thresholds": {
                     "fall_accel_threshold": self.fall_accel_threshold,
@@ -237,6 +262,7 @@ class FallDetector:
                     "fall_cooldown_seconds": self.fall_cooldown_seconds,
                     "fall_recovery_timeout_seconds": self.fall_recovery_timeout_seconds,
                     "recovery_motion_threshold": self.recovery_motion_threshold,
+                    "fall_velocity_threshold": self.fall_velocity_threshold,
                 },
             },
         )
@@ -430,6 +456,7 @@ class SafetyEngine:
         abnormal_min_seconds: float,
         abnormal_baseline_samples: int,
         abnormal_baseline_multiplier: float,
+        fall_velocity_threshold: float = 0.6,
     ) -> None:
         self.falls = FallDetector(
             fall_accel_threshold=fall_accel_threshold,
@@ -437,6 +464,7 @@ class SafetyEngine:
             fall_cooldown_seconds=fall_cooldown_seconds,
             fall_recovery_timeout_seconds=fall_recovery_timeout_seconds,
             inactivity_motion_threshold=inactivity_motion_threshold,
+            fall_velocity_threshold=fall_velocity_threshold,
         )
         self.inactivity = InactivityDetector(
             inactivity_seconds=inactivity_seconds,

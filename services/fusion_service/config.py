@@ -32,6 +32,10 @@ class FusionSettings(Settings):
     stale_timeout_seconds: float = Field(default=3.0, gt=0.0, le=3600.0, allow_inf_nan=False)
 
     fall_accel_threshold: float = Field(default=2.5, gt=0.0, allow_inf_nan=False)
+    # Peak downward hip speed, in frame-heights per second, above which video
+    # alone calls a fall.  Lower it to catch more falls at the cost of reading
+    # fast sit-downs as falls; needs tuning against the real camera.
+    fall_velocity_threshold: float = Field(default=0.6, gt=0.0, allow_inf_nan=False)
     fall_correlation_ms: int = Field(default=1500, gt=0, le=60_000)
     fall_cooldown_seconds: float = Field(default=30.0, ge=0.0, le=86_400.0, allow_inf_nan=False)
     fall_recovery_timeout_seconds: float = Field(

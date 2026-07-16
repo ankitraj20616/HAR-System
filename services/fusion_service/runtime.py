@@ -98,6 +98,7 @@ class FusionMQTTDependency:
         self.engine = engine or FusionEngine(settings)
         self.safety = safety or SafetyEngine(
             fall_accel_threshold=settings.fall_accel_threshold,
+            fall_velocity_threshold=settings.fall_velocity_threshold,
             fall_correlation_ms=settings.fall_correlation_ms,
             fall_cooldown_seconds=settings.fall_cooldown_seconds,
             fall_recovery_timeout_seconds=settings.fall_recovery_timeout_seconds,

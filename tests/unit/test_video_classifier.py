@@ -32,6 +32,64 @@ def standing_pose(
     )
 
 
+def standing_pose_at(drop: float = 0.0) -> PoseLandmarks:
+    """An upright body whose every joint is shifted ``drop`` down the frame.
+
+    Framed high enough that a full fall keeps the ankles inside the image, so
+    the pose stays observed rather than extrapolated.
+    """
+
+    return PoseLandmarks(
+        {
+            "left_shoulder": Landmark(0.4, 0.05 + drop),
+            "right_shoulder": Landmark(0.6, 0.05 + drop),
+            "left_hip": Landmark(0.4, 0.30 + drop),
+            "right_hip": Landmark(0.6, 0.30 + drop),
+            "left_knee": Landmark(0.4, 0.48 + drop),
+            "right_knee": Landmark(0.6, 0.48 + drop),
+            "left_ankle": Landmark(0.4, 0.66 + drop),
+            "right_ankle": Landmark(0.6, 0.66 + drop),
+            "left_wrist": Landmark(0.3, 0.25 + drop),
+            "right_wrist": Landmark(0.7, 0.25 + drop),
+        }
+    )
+
+
+def test_standing_still_reports_no_vertical_velocity() -> None:
+    classifier = ActivityClassifier(VideoSettings(fps=10.0))
+
+    result = None
+    for _ in range(6):
+        result = classifier.classify(standing_pose_at(0.0))
+
+    assert result is not None
+    assert result.vertical_velocity == pytest.approx(0.0, abs=0.01)
+
+
+def test_a_body_dropping_down_the_frame_reports_downward_velocity() -> None:
+    classifier = ActivityClassifier(VideoSettings(fps=10.0))
+    for _ in range(4):
+        classifier.classify(standing_pose_at(0.0))
+
+    # 0.06 of frame height per frame at 10 FPS is 0.6 frame-heights per second.
+    result = None
+    for step in range(1, 5):
+        result = classifier.classify(standing_pose_at(0.06 * step))
+
+    assert result is not None
+    assert result.vertical_velocity == pytest.approx(0.6, abs=0.05)
+
+
+def test_a_body_rising_reports_negative_vertical_velocity() -> None:
+    classifier = ActivityClassifier(VideoSettings(fps=10.0))
+    for step in range(4, 0, -1):
+        classifier.classify(standing_pose_at(0.06 * step))
+
+    result = classifier.classify(standing_pose_at(0.0))
+
+    assert result.vertical_velocity < 0.0
+
+
 def sitting_pose() -> PoseLandmarks:
     return PoseLandmarks(
         {

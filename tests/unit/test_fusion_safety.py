@@ -38,6 +38,7 @@ def video(
     orientation: str = "horizontal",
     label: str = "LYING",
     confidence: float = 0.8,
+    velocity: float = 0.0,
 ) -> VideoPrediction:
     return VideoPrediction(
         ts=START + timedelta(seconds=seconds),
@@ -45,6 +46,7 @@ def video(
         label=label,
         confidence=confidence,
         orientation=orientation,
+        vertical_velocity=velocity,
     )
 
 
@@ -64,9 +66,44 @@ def fall_detector(**changes: float) -> FallDetector:
         "fall_cooldown_seconds": 5,
         "fall_recovery_timeout_seconds": 10,
         "inactivity_motion_threshold": 0.1,
+        "fall_velocity_threshold": 0.6,
     }
     values.update(changes)
     return FallDetector(**values)
+
+
+def test_a_fast_drop_into_horizontal_raises_a_fall_without_any_sensor() -> None:
+    detector = fall_detector()
+
+    event = detector.process(video(0.0, velocity=1.2))
+
+    assert event is not None
+    assert event.type == "FALL"
+    assert event.evidence["two_modality_confirmed"] is False
+    assert event.evidence["rule"] == "video_drop_and_horizontal"
+
+
+def test_settling_slowly_into_horizontal_raises_no_fall_without_a_sensor() -> None:
+    detector = fall_detector()
+
+    assert detector.process(video(0.0, velocity=0.1)) is None
+
+
+def test_a_fast_drop_while_still_upright_raises_no_fall() -> None:
+    detector = fall_detector()
+
+    assert detector.process(video(0.0, orientation="vertical", velocity=1.2)) is None
+
+
+def test_a_sensor_spike_still_upgrades_a_video_fall_to_two_modality() -> None:
+    detector = fall_detector()
+
+    detector.process(sensor(0.0, motion=3.0))
+    event = detector.process(video(0.2, velocity=1.2))
+
+    assert event is not None
+    assert event.evidence["two_modality_confirmed"] is True
+    assert event.evidence["rule"] == "motion_spike_and_horizontal"
 
 
 @pytest.mark.parametrize("video_first", [False, True])

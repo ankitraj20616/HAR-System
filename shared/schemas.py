@@ -118,6 +118,10 @@ class VideoPrediction(TimestampedContract):
     label: ActivityLabel
     confidence: Confidence
     orientation: Orientation
+    # Peak downward hip speed in frame-heights per second; negative when
+    # rising.  This is video's counterpart to the sensor's motion_intensity
+    # and is what lets a fall be seen without a wearable.
+    vertical_velocity: confloat(allow_inf_nan=False) = 0.0
 
     @field_validator("modality")
     @classmethod

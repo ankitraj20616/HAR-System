@@ -53,6 +53,7 @@ class PoseFeatures:
     normalized_body_height: float
     mean_visibility: float
     hip_center_x: float
+    hip_center_y: float
     hip_knee_ratio: float
     torso_depth_ratio: float
     ankle_offset: float
@@ -75,6 +76,7 @@ class ClassificationResult:
     confidence: float
     orientation: Orientation
     features: PoseFeatures | None = None
+    vertical_velocity: float = 0.0
 
 
 def extract_features(pose: PoseLandmarks, min_visibility: float) -> PoseFeatures | None:
@@ -132,6 +134,7 @@ def extract_features(pose: PoseLandmarks, min_visibility: float) -> PoseFeatures
         normalized_body_height=body_height,
         mean_visibility=sum(point.visibility for point in points) / len(points),
         hip_center_x=hip_center.x,
+        hip_center_y=hip_center.y,
         hip_knee_ratio=hip_knee_ratio,
         torso_depth_ratio=torso_depth_ratio,
         ankle_offset=named[LEFT_ANKLE].y - named[RIGHT_ANKLE].y,
@@ -236,6 +239,7 @@ class ActivityClassifier:
             confidence=round(max(0.0, min(1.0, confidence)), 4),
             orientation=orientation,
             features=features,
+            vertical_velocity=round(self._vertical_velocity(), 4),
         )
 
     def _unknown(self) -> ClassificationResult:
@@ -262,6 +266,23 @@ class ActivityClassifier:
 
     def _history_ready(self) -> bool:
         return len(self._history) >= max(3, self.settings.motion_history_length // 2)
+
+    def _vertical_velocity(self) -> float:
+        """Peak downward hip speed in frame-heights per second over the window.
+
+        A fall is a brief spike, so the peak per-frame step is the signal; a
+        mean over the whole window would dilute it below any useful threshold.
+        Positive means falling: image coordinates grow downward.
+        """
+
+        if len(self._history) < 2:
+            return 0.0
+        history = tuple(self._history)
+        steps = [
+            current.hip_center_y - previous.hip_center_y
+            for previous, current in zip(history, history[1:], strict=False)
+        ]
+        return max(steps) * self.settings.fps
 
     def _temporal_metrics(self) -> tuple[float, int, bool]:
         if len(self._history) < 2:
