@@ -37,6 +37,11 @@ ESSENTIAL = (
 )
 MOTION_POINTS = ESSENTIAL + (LEFT_WRIST, RIGHT_WRIST)
 
+# When the vertical distance between hip-center and knee-center is below this
+# fraction of the total body height the person is almost certainly sitting.
+# This is more reliable than joint angles on 2D phone cameras.
+_SITTING_HIP_KNEE_RATIO = 0.18
+
 
 @dataclass(frozen=True, slots=True)
 class PoseFeatures:
@@ -48,7 +53,10 @@ class PoseFeatures:
     normalized_body_height: float
     mean_visibility: float
     hip_center_x: float
+    hip_knee_ratio: float
+    torso_depth_ratio: float
     ankle_offset: float
+    wrist_offset: float
     movement_signal: float
     coordinates: tuple[tuple[str, float, float], ...]
 
@@ -98,20 +106,36 @@ def extract_features(pose: PoseLandmarks, min_visibility: float) -> PoseFeatures
 
     visible = pose.visible(min_visibility)
     ys = [point.y for point in visible.values()]
+    body_height = max(ys) - min(ys)
     coordinates = tuple(
         sorted((name, point.x, point.y) for name, point in visible.items() if name in MOTION_POINTS)
     )
     wrists = [visible[name].y for name in (LEFT_WRIST, RIGHT_WRIST) if name in visible]
+    # Hip-knee vertical ratio: when sitting, hips and knees are at nearly the
+    # same height so this ratio is small.  When standing, knees are well below
+    # hips giving a larger ratio.  This is the most reliable sitting signal for
+    # 2D phone cameras where joint angles get distorted by perspective.
+    knee_center = midpoint(named[LEFT_KNEE], named[RIGHT_KNEE])
+    hip_knee_vertical = abs(knee_center.y - hip_center.y)
+    hip_knee_ratio = hip_knee_vertical / body_height if body_height > 0.01 else 0.0
+    # Foreshortening detection: if the person is lying down facing the camera (feet towards camera),
+    # the 2D torso angle looks upright, but the Z-depth difference between shoulders and hips is huge.
+    torso_dz = abs(shoulder_center.z - hip_center.z)
+    torso_depth_ratio = torso_dz / body_height if body_height > 0.01 else 0.0
+    
     return PoseFeatures(
         torso_angle_from_vertical=torso_angle,
         left_hip_angle=left_hip_angle,
         right_hip_angle=right_hip_angle,
         left_knee_angle=left_knee_angle,
         right_knee_angle=right_knee_angle,
-        normalized_body_height=max(ys) - min(ys),
+        normalized_body_height=body_height,
         mean_visibility=sum(point.visibility for point in points) / len(points),
         hip_center_x=hip_center.x,
+        hip_knee_ratio=hip_knee_ratio,
+        torso_depth_ratio=torso_depth_ratio,
         ankle_offset=named[LEFT_ANKLE].y - named[RIGHT_ANKLE].y,
+        wrist_offset=named.get(LEFT_WRIST, named[LEFT_SHOULDER]).y - named.get(RIGHT_WRIST, named[RIGHT_SHOULDER]).y,
         movement_signal=sum(wrists) / len(wrists) if wrists else shoulder_center.y,
         coordinates=coordinates,
     )
@@ -133,13 +157,21 @@ class ActivityClassifier:
             return self._unknown()
 
         orientation = self._orientation(features.torso_angle_from_vertical)
-        upright = features.torso_angle_from_vertical <= self.settings.horizontal_angle_threshold
+        # 2D Foreshortening Fix: if Z-depth of torso is very large relative to body height,
+        # they are lying down facing the camera (feet towards camera).
+        is_foreshortened_lying = features.torso_depth_ratio > 0.4
+        
+        upright = features.torso_angle_from_vertical <= self.settings.horizontal_angle_threshold and not is_foreshortened_lying
         self._history.append(features)
         motion, alternations, repetitive = self._temporal_metrics()
 
-        if orientation is Orientation.HORIZONTAL:
+        if orientation is Orientation.HORIZONTAL or is_foreshortened_lying:
+            # Torso is clearly horizontal OR foreshortened towards camera → LYING
             label = ActivityLabel.LYING
-            margin = self._horizontal_margin(features.torso_angle_from_vertical)
+            if is_foreshortened_lying:
+                margin = self._above_margin(features.torso_depth_ratio, 0.4, 0.8)
+            else:
+                margin = self._horizontal_margin(features.torso_angle_from_vertical)
         elif (
             self._history_ready()
             and upright
@@ -159,20 +191,39 @@ class ActivityClassifier:
         elif upright and (
             features.mean_hip_angle <= self.settings.sitting_joint_angle
             or features.mean_knee_angle <= self.settings.sitting_joint_angle
+            or features.hip_knee_ratio < _SITTING_HIP_KNEE_RATIO
         ):
+            # Sitting detected by EITHER joint angles (classic) OR vertical
+            # compression of hips-to-knees (2D camera fallback).  The ratio
+            # check solves persistent misclassification on phone cameras where
+            # perspective distortion inflates angles beyond the threshold.
             label = ActivityLabel.SITTING
             flexion = min(features.mean_hip_angle, features.mean_knee_angle)
-            margin = self._below_margin(flexion, self.settings.sitting_joint_angle)
-        elif upright and (
-            features.mean_hip_angle >= self.settings.standing_joint_angle
-            and features.mean_knee_angle >= self.settings.standing_joint_angle
-        ):
+            angle_margin = self._below_margin(flexion, self.settings.sitting_joint_angle)
+            ratio_margin = self._below_margin(
+                features.hip_knee_ratio, _SITTING_HIP_KNEE_RATIO
+            )
+            margin = max(angle_margin, ratio_margin)
+        elif upright:
+            # Upright but not clearly sitting → STANDING (eliminates the
+            # deadzone between sitting_joint_angle and standing_joint_angle
+            # that previously caused UNKNOWN on phone cameras).
             label = ActivityLabel.STANDING
             extension = min(features.mean_hip_angle, features.mean_knee_angle)
-            margin = self._above_margin(extension, self.settings.standing_joint_angle, 180.0)
+            margin = self._above_margin(
+                extension, self.settings.sitting_joint_angle, 180.0
+            )
         else:
-            label = ActivityLabel.UNKNOWN
-            margin = 0.0
+            # Transition zone: torso is between upright threshold and lying
+            # threshold.  Use normalized body height as a tie-breaker – a
+            # tall silhouette is likely standing/leaning, a short one is
+            # likely lying down.
+            if features.normalized_body_height > 0.3:
+                label = ActivityLabel.STANDING
+                margin = 0.35
+            else:
+                label = ActivityLabel.LYING
+                margin = 0.35
 
         temporal = self._temporal_consistency(label)
         self._labels.append(label)
@@ -233,14 +284,25 @@ class ActivityClassifier:
                     / len(common)
                 )
         motion = sum(motions) / len(motions) if motions else 0.0
-        signs = [
+        signs_ankle = [
             1 if item.ankle_offset > 0.005 else -1 if item.ankle_offset < -0.005 else 0
             for item in self._history
         ]
-        non_zero = [sign for sign in signs if sign]
-        alternations = sum(
-            first != second for first, second in zip(non_zero, non_zero[1:], strict=False)
+        non_zero_ankle = [sign for sign in signs_ankle if sign]
+        alt_ankle = sum(
+            first != second for first, second in zip(non_zero_ankle, non_zero_ankle[1:], strict=False)
         )
+        
+        signs_wrist = [
+            1 if item.wrist_offset > 0.005 else -1 if item.wrist_offset < -0.005 else 0
+            for item in self._history
+        ]
+        non_zero_wrist = [sign for sign in signs_wrist if sign]
+        alt_wrist = sum(
+            first != second for first, second in zip(non_zero_wrist, non_zero_wrist[1:], strict=False)
+        )
+        # Use either ankle or wrist swinging for walking alternations
+        alternations = max(alt_ankle, alt_wrist)
 
         signals = [item.movement_signal for item in self._history]
         deltas = [second - first for first, second in zip(signals, signals[1:], strict=False)]

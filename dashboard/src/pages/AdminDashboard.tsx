@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { StatusBar } from '../components/StatusBar';
 import { useDashboardData } from '../hooks/useDashboardData';
-import { ShieldCheck, UserCircle, CheckCircle } from '@phosphor-icons/react';
+import { ShieldCheck, UserCircle, CheckCircle, Trash } from '@phosphor-icons/react';
 import type { AppRole } from '../types';
 
 export default function AdminDashboard() {
@@ -24,6 +24,17 @@ export default function AdminDashboard() {
     }
     catch (reason) { 
       setMessage(reason instanceof Error ? reason.message : 'Role update failed.'); 
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete user ${email}?`)) return;
+    try {
+      await api.deleteUser(userId);
+      setMessage(`User ${email} deleted successfully.`);
+      api.users().then(setUsers).catch(() => {});
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : 'User deletion failed.');
     }
   };
 
@@ -92,14 +103,24 @@ export default function AdminDashboard() {
                     <span className="font-medium text-slate-900">{u.email}</span>
                     <span className="text-xs text-slate-400 font-mono mt-1">{u.user_id}</span>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${
-                    u.role === 'admin' ? 'bg-indigo-100 text-indigo-700' :
-                    u.role === 'doctor' ? 'bg-blue-100 text-blue-700' :
-                    u.role === 'caregiver' ? 'bg-emerald-100 text-emerald-700' :
-                    'bg-slate-200 text-slate-600'
-                  }`}>
-                    {u.role}
-                  </span>
+                  <div className="flex items-center gap-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                      u.role === 'admin' ? 'bg-indigo-100 text-indigo-700' :
+                      u.role === 'doctor' ? 'bg-blue-100 text-blue-700' :
+                      u.role === 'caregiver' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-slate-200 text-slate-600'
+                    }`}>
+                      {u.role}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteUser(u.user_id, u.email)}
+                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                      title="Delete User"
+                      aria-label="Delete User"
+                    >
+                      <Trash weight="duotone" className="w-5 h-5" />
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

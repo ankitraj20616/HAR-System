@@ -22,6 +22,7 @@ from services.auth_service.config import AuthSettings, get_service_settings
 from services.auth_service.local_auth import (
     AuthError,
     InvalidAccessToken,
+    delete_user,
     get_user_from_token,
     list_users,
     login,
@@ -152,6 +153,20 @@ def create_app(
             raise HTTPException(status_code=403, detail="Admin role is required")
         try:
             return await update_user_role(user_id, body.role, user.user_id, config)
+        except AuthError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.delete("/api/admin/users/{user_id}")
+    async def delete_user_route(
+        user_id: str,
+        user: AuthenticatedUser = Depends(current_user),  # noqa: B008
+    ) -> dict[str, str]:
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin role is required")
+        if user_id == user.user_id:
+            raise HTTPException(status_code=403, detail="You cannot delete your own account")
+        try:
+            return await delete_user(user_id, user.user_id, config)
         except AuthError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -71,9 +71,11 @@ def verify_access_token(token: str, settings: AuthSettings) -> dict[str, Any]:
 
 
 async def signup(email: str, password: str, settings: AuthSettings) -> dict[str, Any]:
-    """Create a new user account. Returns the created user row."""
+    """Create a new user account with default 'caregiver' role. Returns the created user row."""
     email = email.strip().lower()
     pw_hash = hash_password(password)
+    # Super admins get 'admin' role automatically; everyone else gets 'caregiver'.
+    default_role = "admin" if email in settings.super_admin_email_set else "caregiver"
     try:
         with psycopg.connect(settings.database_url) as conn:
             with conn.cursor() as cur:
@@ -82,10 +84,19 @@ async def signup(email: str, password: str, settings: AuthSettings) -> dict[str,
                     (email, pw_hash),
                 )
                 row = cur.fetchone()
-                conn.commit()
                 if row is None:
                     raise AuthError("Failed to create user")
-                return {"id": str(row[0]), "email": row[1], "created_at": str(row[2])}
+                user_id = str(row[0])
+                # Assign default role immediately so the user never lands in 'pending'.
+                # A DB trigger creates 'pending' first, so we MUST do an UPSERT here.
+                cur.execute(
+                    "INSERT INTO user_roles (user_id, role, updated_by) "
+                    "VALUES (%s, %s::app_role, %s) "
+                    "ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_by = EXCLUDED.updated_by",
+                    (user_id, default_role, user_id),
+                )
+                conn.commit()
+                return {"id": user_id, "email": row[1], "role": default_role, "created_at": str(row[2])}
     except psycopg.errors.UniqueViolation as exc:
         raise AuthError("An account with this email already exists") from exc
 
@@ -159,6 +170,19 @@ async def update_user_role(
             )
             conn.commit()
     return {"user_id": user_id, "role": new_role}
+
+
+async def delete_user(
+    user_id: str, admin_user_id: str, settings: AuthSettings
+) -> dict[str, str]:
+    """Delete a user account. This cascades to remove their roles."""
+    with psycopg.connect(settings.database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
+            if cur.fetchone() is None:
+                raise AuthError(f"User {user_id} not found")
+            conn.commit()
+    return {"message": f"User {user_id} deleted successfully"}
 
 
 async def list_users(settings: AuthSettings) -> list[dict[str, Any]]:

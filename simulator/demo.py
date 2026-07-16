@@ -33,6 +33,7 @@ class DemoSettings(BaseSettings):
     simulator_sampling_hz: float = Field(default=50.0, ge=10.0, le=200.0)
     simulator_chunk_seconds: float = Field(default=0.5, ge=0.1, le=5.0)
     simulator_scenario_seconds: float = Field(default=12.0, ge=2.0, le=300.0)
+    simulator_mock_video: bool = True
 
     @model_validator(mode="after")
     def chunk_contains_samples(self) -> DemoSettings:
@@ -154,21 +155,22 @@ def main() -> int:
                 )
                 
                 # Mock video prediction
-                phase = int(elapsed / settings.simulator_scenario_seconds) % 3
-                v_label = ActivityLabel.STANDING if phase == 0 else (ActivityLabel.WALKING if phase == 1 else ActivityLabel.EXERCISING)
-                video_payload = VideoPrediction(
-                    ts=now_ts,
-                    modality=Modality.VIDEO,
-                    label=v_label,
-                    confidence=0.88,
-                    orientation=Orientation.VERTICAL,
-                )
-                client.publish(
-                    video_policy.topic,
-                    video_payload.model_dump_json(),
-                    qos=video_policy.qos,
-                    retain=video_policy.retain,
-                )
+                if settings.simulator_mock_video:
+                    phase = int(elapsed / settings.simulator_scenario_seconds) % 3
+                    v_label = ActivityLabel.STANDING if phase == 0 else (ActivityLabel.WALKING if phase == 1 else ActivityLabel.EXERCISING)
+                    video_payload = VideoPrediction(
+                        ts=now_ts,
+                        modality=Modality.VIDEO,
+                        label=v_label,
+                        confidence=0.88,
+                        orientation=Orientation.VERTICAL,
+                    )
+                    client.publish(
+                        video_policy.topic,
+                        video_payload.model_dump_json(),
+                        qos=video_policy.qos,
+                        retain=video_policy.retain,
+                    )
             next_publish += settings.simulator_chunk_seconds
             if next_publish < now - settings.simulator_chunk_seconds:
                 next_publish = now + settings.simulator_chunk_seconds
