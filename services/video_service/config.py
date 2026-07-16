@@ -20,6 +20,10 @@ class VideoSettings(Settings):
     motion_history_length: int = Field(default=12, ge=3, le=120)
     walking_motion_threshold: float = Field(default=0.018, gt=0.0, le=0.5)
     exercise_motion_threshold: float = Field(default=0.045, gt=0.0, le=1.0)
+    # Network sources buffer frames when read slower than they arrive; the
+    # grabber thread keeps only the newest frame. Local webcams do not need it.
+    video_low_latency: bool = Field(default=True)
+    capture_read_timeout: float = Field(default=5.0, ge=0.5, le=30.0)
     reconnect_attempts: int = Field(default=5, ge=1, le=100)
     reconnect_initial_backoff: float = Field(default=0.25, ge=0.0, le=30.0)
     reconnect_max_backoff: float = Field(default=5.0, gt=0.0, le=60.0)

@@ -11,8 +11,8 @@ from services.runtime import (
 )
 from services.video_service.adapters import (
     MediaPipePoseEstimator,
-    OpenCVCamera,
     VideoMQTTPublisher,
+    build_camera,
 )
 from services.video_service.config import (
     SERVICE_NAME,
@@ -47,7 +47,7 @@ def create_app(
         pipeline = VideoPipeline(
             video_settings,
             publisher,
-            camera_factory=lambda: OpenCVCamera(video_settings.camera_index, video_settings.fps),
+            camera_factory=lambda: build_camera(video_settings),
             estimator_factory=lambda: MediaPipePoseEstimator(video_settings.min_visibility),
         )
         resolved_dependencies = (publisher, pipeline)

@@ -30,6 +30,13 @@ class FakeCamera:
         self.released = True
 
 
+class FakeStatsCamera(FakeCamera):
+    """Stands in for LatestFrameCamera, which reports capture counters."""
+
+    def stats(self) -> dict[str, int]:
+        return {"frames_captured": 10, "frames_dropped": 4, "frames_held": 0}
+
+
 class FakeEstimator:
     def __init__(self, pose) -> None:
         self.pose = pose
@@ -82,6 +89,47 @@ def test_pipeline_publishes_contract_and_releases_resources_after_read_failure()
         assert prediction.orientation == Orientation.VERTICAL
         assert prediction.modality == "video"
         assert pipeline.health().status == "degraded"
+        await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_health_reports_capture_counters_when_the_camera_tracks_them() -> None:
+    async def scenario() -> None:
+        pipeline = VideoPipeline(
+            VideoSettings(),
+            FakePublisher(),
+            camera_factory=lambda: FakeStatsCamera([object()]),
+            estimator_factory=lambda: FakeEstimator(standing_pose()),
+            run_blocking=run_immediately,
+        )
+        await pipeline._open_resources()
+
+        health = pipeline.health()
+
+        assert health.status == "healthy"
+        assert "dropped=4" in health.detail
+        assert "captured=10" in health.detail
+        await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_health_omits_capture_counters_for_a_plain_camera() -> None:
+    async def scenario() -> None:
+        pipeline = VideoPipeline(
+            VideoSettings(),
+            FakePublisher(),
+            camera_factory=lambda: FakeCamera([object()]),
+            estimator_factory=lambda: FakeEstimator(standing_pose()),
+            run_blocking=run_immediately,
+        )
+        await pipeline._open_resources()
+
+        health = pipeline.health()
+
+        assert health.status == "healthy"
+        assert "dropped" not in health.detail
         await pipeline.stop()
 
     asyncio.run(scenario())

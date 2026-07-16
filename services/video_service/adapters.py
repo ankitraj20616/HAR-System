@@ -6,13 +6,34 @@ run on systems without a webcam or MediaPipe installation.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
+from typing import Any, Protocol
 
 from services.runtime import MQTTDependency
+from services.video_service.config import VideoSettings
 from services.video_service.landmarks import Landmark, PoseLandmarks
+from shared.logging import get_logger
 from shared.schemas import VideoPrediction
 from shared.topics import VIDEO_PREDICTION, policy_for
+
+logger = get_logger(__name__)
+
+
+class _Camera(Protocol):
+    @property
+    def is_opened(self) -> bool: ...
+
+    def read(self) -> tuple[bool, Any]: ...
+
+    def release(self) -> None: ...
+
+
+def is_network_source(camera_index: str) -> bool:
+    """Network streams are URLs; local webcams are plain device numbers."""
+
+    return not camera_index.isdigit()
 
 
 class OpenCVCamera:
@@ -23,11 +44,14 @@ class OpenCVCamera:
             import cv2
         except ImportError as exc:
             raise RuntimeError("opencv-python is required for webcam capture") from exc
-        
+
         # If the string is just a number (e.g. "0"), parse it to int for local devices
         target_index = int(camera_index) if camera_index.isdigit() else camera_index
         self._capture = cv2.VideoCapture(target_index)
         self._capture.set(cv2.CAP_PROP_FPS, fps)
+        # Honoured by V4L2/DSHOW webcams. FFmpeg network streams ignore it, which
+        # is why those are wrapped in LatestFrameCamera instead.
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     @property
     def is_opened(self) -> bool:
@@ -38,6 +62,132 @@ class OpenCVCamera:
 
     def release(self) -> None:
         self._capture.release()
+
+
+class LatestFrameCamera:
+    """Keep only the newest frame of a buffered network stream.
+
+    Network sources deliver frames faster than the pose pipeline consumes them.
+    Unread frames queue up in the OS socket buffer, so ``read()`` on the inner
+    camera hands back progressively older frames and latency never recovers. A
+    grabber thread drains the stream at its native rate and keeps just the most
+    recent frame, so the backlog cannot form.
+
+    Privacy: at most one frame is held, it is replaced in place, and it is
+    dropped as soon as the pipeline takes it. Nothing is encoded or persisted.
+
+    Thread ownership: the grabber thread is the only owner of the inner camera.
+    It reads it and releases it, so the inner camera is never touched while
+    another thread is mid-read.
+    """
+
+    def __init__(self, inner: _Camera, *, read_timeout: float = 5.0) -> None:
+        self._inner = inner
+        self._read_timeout = read_timeout
+        self._new_frame = threading.Condition()
+        self._frame: Any = None
+        self._seq = 0
+        self._last_returned = 0
+        self._dropped = 0
+        self._failed = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+        # Check before starting the thread; afterwards the inner camera belongs
+        # to the grabber alone.
+        self._opened = inner.is_opened
+        if not self._opened:
+            return
+        self._thread = threading.Thread(
+            target=self._drain, name="video-frame-grabber", daemon=True
+        )
+        self._thread.start()
+
+    @property
+    def is_opened(self) -> bool:
+        with self._new_frame:
+            return self._opened and not self._failed
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def _drain(self) -> None:
+        """Read at the stream's own rate, keeping only the newest frame."""
+
+        try:
+            while not self._stop.is_set():
+                ok, frame = self._inner.read()
+                with self._new_frame:
+                    if not ok or frame is None:
+                        self._failed = True
+                        self._new_frame.notify_all()
+                        return
+                    if self._seq > self._last_returned:
+                        # The previous frame is going out unprocessed; that is
+                        # the point, but it is worth counting.
+                        self._dropped += 1
+                    self._frame = frame
+                    self._seq += 1
+                    self._new_frame.notify_all()
+        finally:
+            with suppress(Exception):
+                self._inner.release()
+
+    def read(self) -> tuple[bool, Any]:
+        """Return the newest unseen frame, or fail so the pipeline reconnects."""
+
+        with self._new_frame:
+            fresh = self._new_frame.wait_for(
+                lambda: self._seq > self._last_returned or self._failed,
+                timeout=self._read_timeout,
+            )
+            if self._failed or not fresh:
+                return False, None
+            self._last_returned = self._seq
+            frame, self._frame = self._frame, None
+            return True, frame
+
+    def stats(self) -> dict[str, int]:
+        with self._new_frame:
+            return {
+                "frames_captured": self._seq,
+                "frames_dropped": self._dropped,
+                "frames_held": 0 if self._frame is None else 1,
+            }
+
+    def release(self) -> None:
+        self._stop.set()
+        with self._new_frame:
+            # Privacy boundary: never keep a frame alive past shutdown.
+            self._frame = None
+        thread = self._thread
+        if thread is None:
+            # No grabber ever ran, so nobody else owns the inner camera.
+            with suppress(Exception):
+                self._inner.release()
+            return
+        thread.join(timeout=self._read_timeout + 1.0)
+        if thread.is_alive():
+            # Daemon thread; it exits with the process once its blocking read
+            # returns, and it releases the inner camera on the way out.
+            logger.warning(
+                "Video grabber thread did not stop in time",
+                extra={"event": "video_grabber_stop_timeout"},
+            )
+
+
+def build_camera(
+    settings: VideoSettings,
+    *,
+    factory: Callable[[str, float], _Camera] = OpenCVCamera,
+) -> _Camera:
+    """Open the configured camera, adding the grabber only where it helps."""
+
+    camera = factory(settings.camera_index, settings.fps)
+    if settings.video_low_latency and is_network_source(settings.camera_index):
+        return LatestFrameCamera(camera, read_timeout=settings.capture_read_timeout)
+    return camera
 
 
 class MediaPipePoseEstimator:

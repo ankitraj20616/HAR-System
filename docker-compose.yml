@@ -130,6 +130,11 @@ services:
       RECONNECT_ATTEMPTS: ${RECONNECT_ATTEMPTS:-5}
       RECONNECT_INITIAL_BACKOFF: ${RECONNECT_INITIAL_BACKOFF:-0.25}
       RECONNECT_MAX_BACKOFF: ${RECONNECT_MAX_BACKOFF:-5.0}
+      VIDEO_LOW_LATENCY: ${VIDEO_LOW_LATENCY:-true}
+      CAPTURE_READ_TIMEOUT: ${CAPTURE_READ_TIMEOUT:-5.0}
+      # Read by OpenCV's FFmpeg backend at import time; keeps network streams
+      # from building an internal buffer of their own.
+      OPENCV_FFMPEG_CAPTURE_OPTIONS: ${OPENCV_FFMPEG_CAPTURE_OPTIONS:-fflags;nobuffer|flags;low_delay}
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${VIDEO_SERVICE_PORT:-8004}:8004"
     depends_on:

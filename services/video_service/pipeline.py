@@ -85,7 +85,20 @@ class VideoPipeline:
         self._health = DependencyHealth(status="stopped", detail="camera released")
 
     def health(self) -> DependencyHealth:
-        return self._health
+        # Counters are read live: a rising drop count is how an operator can see
+        # that stale network frames are being discarded rather than queued.
+        stats = getattr(self._camera, "stats", None)
+        if self._health.status != "healthy" or stats is None:
+            return self._health
+        counters = stats()
+        return DependencyHealth(
+            status="healthy",
+            detail=(
+                f"{self._health.detail}; "
+                f"captured={counters['frames_captured']}, "
+                f"dropped={counters['frames_dropped']}"
+            ),
+        )
 
     async def process_frame(self, frame: Any) -> VideoPrediction:
         """Process one borrowed frame; only its derived numeric prediction escapes."""
